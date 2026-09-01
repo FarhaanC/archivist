@@ -9,7 +9,7 @@ import {
     supportsWebGpu,
     unloadEngine,
 } from '@/llm/get-engine';
-import { MODEL_OPTIONS, findModel, formatMemory } from '@/llm/models';
+import { MODEL_OPTIONS, describeModel, findModel, formatMemory } from '@/llm/models';
 
 /**
  * The answering model: which one, how big, where it came from, and whether it
@@ -67,6 +67,13 @@ export const ModelStatus = ({
                                 {currentModel.size} parameters · {currentModel.maker} ·{' '}
                                 {formatMemory(currentModel.memoryMb)} in memory
                             </>
+                        ) : selectedModel ? (
+                            <>
+                                Nothing loaded yet. Your first question will fetch{' '}
+                                <strong>{selectedModel.label}</strong> (
+                                {formatMemory(selectedModel.memoryMb)}) on its own. Searching
+                                works without it.
+                            </>
                         ) : (
                             'Nothing loaded. Search works without it; written answers do not.'
                         )}
@@ -76,7 +83,7 @@ export const ModelStatus = ({
             </div>
 
             <span className="field-label" id="model-picker-label">
-                Choose a model
+                Change the model (optional)
             </span>
 
             <div className="field-row">
@@ -92,7 +99,7 @@ export const ModelStatus = ({
                 >
                     {MODEL_OPTIONS.map((model) => (
                         <option key={model.id} value={model.id}>
-                            {model.label} — {formatMemory(model.memoryMb)} — {model.maker}
+                            {describeModel(model)}
                         </option>
                     ))}
                 </select>
@@ -105,7 +112,7 @@ export const ModelStatus = ({
                             ? 'Loading…'
                             : loaded
                               ? `Switch to ${selectedModel?.label ?? 'this model'}`
-                              : `Load ${selectedModel?.label ?? 'model'}`}
+                              : `Load ${selectedModel?.label ?? 'model'} now`}
                     </button>
                 )}
 

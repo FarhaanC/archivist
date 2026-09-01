@@ -1,7 +1,14 @@
 import { useEffect, useRef, useState } from 'react';
 import { ask, type AnswerFailure, type AnswerResult } from '@/llm/answer';
-import { getCurrentModelId } from '@/llm/get-engine';
-import { findModel } from '@/llm/models';
+import {
+    getCurrentModelId,
+    getSelectedModelId,
+    isEngineLoaded,
+    loadEngine,
+    onEngineProgress,
+    supportsWebGpu,
+} from '@/llm/get-engine';
+import { findModel, formatMemory } from '@/llm/models';
 import { makeSnippet } from '@/search/snippet';
 import {
     appendMessage,
@@ -77,6 +84,11 @@ export const AskPanel = ({
     const [error, setError] = useState<string | null>(null);
     const [renaming, setRenaming] = useState<number | null>(null);
     const [renameText, setRenameText] = useState('');
+    const [preparing, setPreparing] = useState(false);
+    const [modelProgress, setModelProgress] = useState<{
+        text: string;
+        progress: number;
+    } | null>(null);
     const endRef = useRef<HTMLDivElement | null>(null);
 
     // On open, restore the most recent conversation. A refresh should not cost
@@ -92,6 +104,8 @@ export const AskPanel = ({
             }
         })();
     }, []);
+
+    useEffect(() => onEngineProgress(setModelProgress), []);
 
     useEffect(() => {
         endRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
@@ -127,6 +141,23 @@ export const AskPanel = ({
         setStreamed('');
 
         try {
+            // Asking a question is the point at which someone has said they
+            // want a written answer, so it is the point at which the model is
+            // worth fetching — not on page load, which would make everyone who
+            // only wanted to search pay for a download they never asked for.
+            if (!isEngineLoaded() && supportsWebGpu()) {
+                setPreparing(true);
+                try {
+                    await loadEngine();
+                } catch {
+                    // Left to the normal failure path: the turn will report
+                    // that no model is loaded and show the passages instead.
+                } finally {
+                    setPreparing(false);
+                    setModelProgress(null);
+                }
+            }
+
             // A conversation is created on the first question, not before, so
             // an abandoned empty chat never clutters the list.
             let conversationId = activeId;
@@ -284,7 +315,36 @@ export const AskPanel = ({
                     ),
                 )}
 
-                {busy && (
+                {preparing && (
+                    <div className="card">
+                        <div className="small">
+                            Getting the answering model ready
+                            {(() => {
+                                const model = findModel(getSelectedModelId());
+                                return model
+                                    ? ` — ${model.label}, ${formatMemory(model.memoryMb)}.`
+                                    : '.';
+                            })()}{' '}
+                            <span className="muted">
+                                This happens once; after that it is kept in this browser.
+                            </span>
+                        </div>
+                        {modelProgress && (
+                            <>
+                                <div className="progress" style={{ marginTop: 8 }}>
+                                    <div
+                                        style={{
+                                            width: `${Math.round(modelProgress.progress * 100)}%`,
+                                        }}
+                                    />
+                                </div>
+                                <span className="small muted mono">{modelProgress.text}</span>
+                            </>
+                        )}
+                    </div>
+                )}
+
+                {busy && !preparing && (
                     <div className="card">
                         <div className="answer">
                             {streamed || <span className="muted small">Searching…</span>}
@@ -323,11 +383,15 @@ export const AskPanel = ({
                         <div className="spread">
                             <span className="small muted">
                                 {(() => {
-                                    const model = getCurrentModelId();
-                                    const option = model ? findModel(model) : undefined;
-                                    return option
-                                        ? `Answers written by ${option.label}, running on this device, citing the documents they came from.`
-                                        : 'No model loaded — you will get passages, not a written answer.';
+                                    const running = getCurrentModelId();
+                                    const option = running ? findModel(running) : undefined;
+                                    if (option) {
+                                        return `Answers written by ${option.label}, running on this device, citing the documents they came from.`;
+                                    }
+                                    const willLoad = findModel(getSelectedModelId());
+                                    return willLoad
+                                        ? `Your first question will fetch ${willLoad.label} (${formatMemory(willLoad.memoryMb)}), once.`
+                                        : 'Answers cite the documents they came from.';
                                 })()}
                             </span>
                             <button

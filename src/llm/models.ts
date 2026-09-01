@@ -23,7 +23,11 @@ export interface ModelOption {
     memoryMb: number;
     /** Who made it, so the provenance is visible rather than implied. */
     maker: string;
-    /** Honest one-line trade-off. */
+    /** Three or four words on what it is for, shown in the dropdown itself.
+     *  Someone choosing has to be able to tell these apart without knowing
+     *  what a parameter is. */
+    bestFor: string;
+    /** Honest one-line trade-off, shown under the dropdown. */
     note: string;
 }
 
@@ -31,6 +35,7 @@ export const MODEL_OPTIONS: ModelOption[] = [
     {
         id: 'SmolLM2-360M-Instruct-q4f16_1-MLC',
         label: 'SmolLM2 360M',
+        bestFor: 'tiny and fast; short summaries only',
         size: '360 million',
         memoryMb: 376,
         maker: 'Hugging Face',
@@ -39,14 +44,16 @@ export const MODEL_OPTIONS: ModelOption[] = [
     {
         id: 'Llama-3.2-1B-Instruct-q4f16_1-MLC',
         label: 'Llama 3.2 1B',
+        bestFor: 'quick, and sticks close to your documents',
         size: '1 billion',
         memoryMb: 879,
         maker: 'Meta',
-        note: 'Fast on almost any machine. Answers stay close to the text, which is mostly what you want here.',
+        note: 'The one that loads by default. Fast on almost any machine, and its answers stay close to what your documents actually say — which is the point here.',
     },
     {
         id: 'Qwen3-1.7B-q4f16_1-MLC',
         label: 'Qwen3 1.7B',
+        bestFor: 'better at following what you asked for',
         size: '1.7 billion',
         memoryMb: 2037,
         maker: 'Alibaba',
@@ -55,14 +62,16 @@ export const MODEL_OPTIONS: ModelOption[] = [
     {
         id: 'Llama-3.2-3B-Instruct-q4f16_1-MLC',
         label: 'Llama 3.2 3B',
+        bestFor: 'fuller answers across several documents',
         size: '3 billion',
         memoryMb: 2264,
         maker: 'Meta',
-        note: 'The default. Balanced quality against a download most machines will tolerate.',
+        note: 'Worth the extra wait if you often ask questions that span several documents at once.',
     },
     {
         id: 'Phi-3.5-mini-instruct-q4f16_1-MLC',
         label: 'Phi 3.5 Mini',
+        bestFor: 'best at working things out step by step',
         size: '3.8 billion',
         memoryMb: 3672,
         maker: 'Microsoft',
@@ -71,6 +80,7 @@ export const MODEL_OPTIONS: ModelOption[] = [
     {
         id: 'Mistral-7B-Instruct-v0.3-q4f16_1-MLC',
         label: 'Mistral 7B',
+        bestFor: 'the best answers; needs a powerful graphics card',
         size: '7 billion',
         memoryMb: 4573,
         maker: 'Mistral AI',
@@ -78,7 +88,22 @@ export const MODEL_OPTIONS: ModelOption[] = [
     },
 ];
 
-export const DEFAULT_MODEL_ID = 'Llama-3.2-3B-Instruct-q4f16_1-MLC';
+/**
+ * What loads when nobody has chosen.
+ *
+ * Deliberately the small one. It downloads in well under a minute on an
+ * ordinary connection, runs on weak graphics hardware, and its answers stay
+ * close to the documents — which is most of what this app asks of a model.
+ * A first-time user should not be handed a two-gigabyte download, or a
+ * failure on a laptop that cannot hold the weights.
+ */
+export const DEFAULT_MODEL_ID = 'Llama-3.2-1B-Instruct-q4f16_1-MLC';
+
+/** How a model appears in the picker: name, what it is for, how big. */
+export const describeModel = (model: ModelOption): string =>
+    `${model.label}${model.id === DEFAULT_MODEL_ID ? ' (recommended)' : ''} — ${
+        model.bestFor
+    } — ${formatMemory(model.memoryMb)}`;
 
 export const findModel = (id: string): ModelOption | undefined =>
     MODEL_OPTIONS.find((model) => model.id === id);
