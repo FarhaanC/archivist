@@ -244,3 +244,20 @@ select option { background: var(--surface); color: var(--text); }
 .chat-main { display: flex; flex-direction: column; gap: 12px; }
 .turn-user { background: var(--surface-2); }
 .turn-user .answer { font-weight: 520; }
+
+/* Import report: the file name leads, the explanation follows in the reading
+   colour, and differences are a short list rather than a run-on sentence. */
+.report-file { font-weight: 540; margin-bottom: 2px; }
+table.report td { padding: 10px 8px; }
+ul.diff-points { list-style: none; margin: 4px 0 4px; padding: 0; }
+ul.diff-points li {
+    padding: 2px 0 2px 14px;
+    position: relative;
+    color: var(--text);
+}
+ul.diff-points li::before {
+    content: "•";
+    position: absolute;
+    left: 2px;
+    color: var(--text-dim);
+}

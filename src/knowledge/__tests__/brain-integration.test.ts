@@ -48,8 +48,10 @@ describe('library brain: duplicate pipeline', () => {
         expect(near!.similarity).toBeGreaterThan(0.95);
 
         const diff = summarizeDiff(wordDiff(V1, V2));
-        expect(diff).toContain('"100" → "120"');
-        expect(diff).toContain('"5" → "7"');
+        expect(diff).toContain('“120”');
+        expect(diff).toContain('“100”');
+        expect(diff).toContain('“7”');
+        expect(diff).toContain('“5”');
 
         // Unrelated content is not flagged
         const unId = await ingestDocument({ fileObj: { name: 'trip.txt' }, text: UNRELATED, workerClient: worker });

@@ -3,9 +3,10 @@ import { ensureDbOpen } from '@/db/ensure-db-open';
 import { findExactDuplicate, findNearDuplicate } from '@/ingestion/dedupe';
 import { ingestDocument } from '@/ingestion/ingest-document';
 import { buildDocProfile, saveDocProfile } from '@/knowledge/doc-profile';
-import { summarizeDiff, wordDiff } from '@/knowledge/word-diff';
+import { describeChanges, summarizeDiff, wordDiff } from '@/knowledge/word-diff';
 import { parseFile } from '@/parsers/parse-file';
 import { UnsupportedFileError } from '@/parsers/types';
+import type { PlainDiff } from '@/knowledge/word-diff';
 import type { EmbeddingWorker } from '@/lib/types';
 
 /**
@@ -19,7 +20,16 @@ import type { EmbeddingWorker } from '@/lib/types';
 
 export type ImportOutcome =
     | { status: 'imported'; file: string; docId: number; chunkCount?: number }
-    | { status: 'near-duplicate'; file: string; docId: number; of: string; diff: string }
+    | {
+          status: 'near-duplicate';
+          file: string;
+          docId: number;
+          of: string;
+          /** One-line form, also stored on the document. */
+          diff: string;
+          /** The same differences as separate plain sentences, for the report. */
+          changes: PlainDiff;
+      }
     | { status: 'duplicate'; file: string; of: string }
     | { status: 'skipped'; file: string; reason: string }
     | { status: 'failed'; file: string; reason: string };
@@ -69,7 +79,8 @@ export const importFiles = async (
             const near = await findNearDuplicate(text, docId, (t) => worker.getEmbedding(t));
             if (near) {
                 const other = await db.documents.get(near.docId);
-                const diff = summarizeDiff(wordDiff(other?.fullText ?? '', text));
+                const changes = wordDiff(other?.fullText ?? '', text);
+                const diff = summarizeDiff(changes);
                 await db.documents.update(docId, {
                     similarToDocId: near.docId,
                     diffSummary: diff,
@@ -80,6 +91,7 @@ export const importFiles = async (
                     docId,
                     of: near.title,
                     diff,
+                    changes: describeChanges(changes),
                 });
                 continue;
             }

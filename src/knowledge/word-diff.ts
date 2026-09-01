@@ -70,14 +70,94 @@ const linearDiff = (a: string[], b: string[]): DiffChange[] => {
     }];
 };
 
-/** Human-readable one-liner: `"5 years" → "7 years"; "100 m" → "120 m" (+2 more)` */
+/* ------------------------------------------------------------------ *
+ * Turning a diff into something a person can read.
+ *
+ * A raw word diff between two versions of a CV is mostly noise: a pipe
+ * character that moved, a line break that became a space, a URL that got
+ * written as link text. Printing it verbatim produces the sort of thing that
+ * made the import report unreadable —
+ *   "UAE Driving License |" → "(nothing)"; "(nothing)" → "|"
+ * — which tells the reader nothing about how the two files actually differ.
+ *
+ * So changes are filtered down to the ones carrying real words, ranked by how
+ * much text they involve, and described in ordinary sentences.
+ * ------------------------------------------------------------------ */
+
+/**
+ * The words and numbers in a fragment, ignoring punctuation and spacing.
+ *
+ * Single characters count: "5 years" becoming "7 years" is exactly the kind of
+ * change a person needs to see, and it reaches here as "5" → "7".
+ */
+const meaningful = (fragment: string): string[] =>
+    fragment.match(/[A-Za-z0-9][A-Za-z0-9'’-]*/g) ?? [];
+
+/**
+ * Changes worth showing a person, most substantial first.
+ *
+ * Dropped: anything where neither side contains a letter or digit. That is
+ * punctuation and spacing shuffling about, which is what filled the old
+ * report with entries like `"|" → "(nothing)"`.
+ */
+export const meaningfulChanges = (changes: DiffChange[]): DiffChange[] =>
+    changes
+        .filter(
+            (change) =>
+                meaningful(change.removed).length > 0 || meaningful(change.added).length > 0,
+        )
+        .sort(
+            (a, b) =>
+                meaningful(b.removed).join(' ').length +
+                meaningful(b.added).join(' ').length -
+                (meaningful(a.removed).join(' ').length + meaningful(a.added).join(' ').length),
+        );
+
+/** Trim to a readable length without cutting a word in half. */
+const clip = (text: string, maxLength: number = 55): string => {
+    const clean = text.replace(/\s+/g, ' ').trim();
+    if (clean.length <= maxLength) return clean;
+    const cut = clean.lastIndexOf(' ', maxLength);
+    return `${clean.slice(0, cut > maxLength / 2 ? cut : maxLength).trim()}…`;
+};
+
+/**
+ * One change, as a sentence.
+ *
+ * `removed` is what the other document says; `added` is what this one says.
+ */
+export const describeChange = (change: DiffChange): string => {
+    const removed = meaningful(change.removed);
+    const added = meaningful(change.added);
+
+    if (removed.length === 0) return `Adds “${clip(change.added)}”`;
+    if (added.length === 0) return `Leaves out “${clip(change.removed)}”`;
+    return `Says “${clip(change.added)}” where the other says “${clip(change.removed)}”`;
+};
+
+export interface PlainDiff {
+    /** Up to `maxShown` sentences, the biggest differences first. */
+    points: string[];
+    /** How many further real changes were not listed. */
+    minorCount: number;
+}
+
+/** The whole diff, in plain sentences. */
+export const describeChanges = (changes: DiffChange[], maxShown: number = 3): PlainDiff => {
+    const worthShowing = meaningfulChanges(changes);
+    return {
+        points: worthShowing.slice(0, maxShown).map(describeChange),
+        minorCount: Math.max(0, worthShowing.length - maxShown),
+    };
+};
+
+/**
+ * A single sentence, for places that can only hold one line — the stored
+ * document profile, and the library inventory shown to the model.
+ */
 export const summarizeDiff = (changes: DiffChange[], maxShown: number = 3): string => {
-    if (!changes.length) return 'identical text';
-    const clip = (s: string) => (s.length > 60 ? s.slice(0, 57) + '…' : s) || '(nothing)';
-    const shown = changes
-        .slice(0, maxShown)
-        .map((c) => `"${clip(c.removed)}" → "${clip(c.added)}"`)
-        .join('; ');
-    const extra = changes.length - maxShown;
-    return shown + (extra > 0 ? ` (+${extra} more change${extra > 1 ? 's' : ''})` : '');
+    const { points, minorCount } = describeChanges(changes, maxShown);
+    if (points.length === 0) return 'The wording is the same; only spacing or punctuation differs.';
+    const tail = minorCount > 0 ? `, plus ${minorCount} smaller wording change${minorCount > 1 ? 's' : ''}` : '';
+    return `${points.join('; ')}${tail}.`;
 };

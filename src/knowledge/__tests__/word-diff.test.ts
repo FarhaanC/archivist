@@ -1,5 +1,11 @@
 import { describe, test, expect } from 'bun:test';
-import { wordDiff, summarizeDiff } from '../word-diff';
+import {
+    describeChange,
+    describeChanges,
+    meaningfulChanges,
+    summarizeDiff,
+    wordDiff,
+} from '../word-diff';
 
 describe('wordDiff', () => {
     test('identical texts produce no changes', () => {
@@ -47,19 +53,103 @@ describe('wordDiff', () => {
     });
 });
 
+describe('meaningfulChanges', () => {
+    /**
+     * The changes that made the old import report unreadable: a pipe character
+     * that moved and a line break that became a space, printed as
+     * `"UAE Driving License |" -> "(nothing)"; "(nothing)" -> "|"`.
+     */
+    test('drops changes that are only punctuation moving around', () => {
+        const changes = [
+            { removed: '|', added: '' },
+            { removed: '', added: '|' },
+            { removed: '—', added: '-' },
+        ];
+        expect(meaningfulChanges(changes)).toEqual([]);
+    });
+
+    test('keeps changes that carry real words', () => {
+        const changes = [
+            { removed: '|', added: '' },
+            { removed: '5 years', added: '7 years' },
+        ];
+        expect(meaningfulChanges(changes)).toEqual([{ removed: '5 years', added: '7 years' }]);
+    });
+
+    test('puts the biggest difference first', () => {
+        const changes = [
+            { removed: 'cat', added: 'dog' },
+            { removed: 'the whole education section listing UBC', added: 'nothing at all here' },
+        ];
+        expect(meaningfulChanges(changes)[0]?.removed).toContain('education section');
+    });
+});
+
+describe('describeChange', () => {
+    test('a pure addition reads as an addition', () => {
+        expect(describeChange({ removed: '', added: 'RAG pipelines and voice AI' })).toBe(
+            'Adds “RAG pipelines and voice AI”',
+        );
+    });
+
+    test('a pure removal reads as an omission', () => {
+        expect(describeChange({ removed: 'UAE Driving License', added: '' })).toBe(
+            'Leaves out “UAE Driving License”',
+        );
+    });
+
+    test('a substitution names both sides, this file first', () => {
+        expect(describeChange({ removed: '5 years', added: '7 years' })).toBe(
+            'Says “7 years” where the other says “5 years”',
+        );
+    });
+
+    test('long fragments are cut at a word boundary', () => {
+        const sentence = describeChange({
+            removed: '',
+            added: 'a very long run of words that goes on well past any reasonable limit for one line',
+        });
+        expect(sentence).toContain('…');
+        expect(sentence).not.toContain('reasonab”');
+    });
+});
+
+describe('describeChanges', () => {
+    test('shows the biggest few and counts the rest', () => {
+        const changes = Array.from({ length: 8 }, (_, i) => ({
+            removed: `old wording number ${i}`,
+            added: `new wording number ${i}`,
+        }));
+        const plain = describeChanges(changes, 3);
+
+        expect(plain.points).toHaveLength(3);
+        expect(plain.minorCount).toBe(5);
+    });
+
+    test('punctuation-only diffs produce nothing to show', () => {
+        const plain = describeChanges([{ removed: '|', added: '' }]);
+        expect(plain.points).toEqual([]);
+        expect(plain.minorCount).toBe(0);
+    });
+});
+
 describe('summarizeDiff', () => {
-    test('formats changes as readable arrows', () => {
+    test('reads as sentences, not as a diff', () => {
         const s = summarizeDiff([{ removed: '5 years', added: '7 years' }]);
-        expect(s).toBe('"5 years" → "7 years"');
+        expect(s).toBe('Says “7 years” where the other says “5 years”.');
     });
 
-    test('caps shown changes and counts the rest', () => {
-        const changes = Array.from({ length: 5 }, (_, i) => ({ removed: `a${i}`, added: `b${i}` }));
-        const s = summarizeDiff(changes, 2);
-        expect(s).toContain('(+3 more changes)');
+    test('counts the changes it did not show', () => {
+        const changes = Array.from({ length: 5 }, (_, i) => ({
+            removed: `alpha bravo ${i}`,
+            added: `charlie delta ${i}`,
+        }));
+        expect(summarizeDiff(changes, 2)).toContain('3 smaller wording changes');
     });
 
-    test('empty diff reads as identical', () => {
-        expect(summarizeDiff([])).toBe('identical text');
+    test('says so plainly when only formatting differs', () => {
+        expect(summarizeDiff([])).toBe(
+            'The wording is the same; only spacing or punctuation differs.',
+        );
     });
 });
