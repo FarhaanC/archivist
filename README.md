@@ -91,6 +91,10 @@ this targets — thousands of chunks, not millions — a linear cosine scan in a
 worker is fast enough, and it keeps the whole store to two tables that can be
 reasoned about and exported.
 
-## License
+## Copyright
 
-MIT — see [LICENSE](LICENSE).
+Copyright © 2026 Farhaan Chida. All rights reserved.
+
+This repository is published so the code can be read and evaluated. No licence
+to use, copy, modify or redistribute it is granted. If you want to use any of
+it, ask me.

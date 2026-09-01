@@ -3,8 +3,8 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Private, offline document search — ask questions about your own files, entirely on-device.",
-  "license": "MIT",
+  "description": "Private, offline document search \u2014 ask questions about your own files, entirely on-device.",
+  "license": "UNLICENSED",
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
@@ -32,5 +32,6 @@
     "fake-indexeddb": "^6.0.0",
     "typescript": "^5.7.3",
     "vite": "^6.0.11"
-  }
+  },
+  "author": "Farhaan Chida"
 }
