@@ -20,11 +20,28 @@ scores, which are on incomparable scales, then boosts literal phrase matches.
 Per-retriever scores stay visible in the UI, because relevance you can't
 inspect is relevance you can't tune.
 
-**Questions get decomposed before they get searched.** "How do the notice
+**Multi-part questions get decomposed — and only those.** "How do the notice
 period in my lease and my contract's resignation terms interact?" is two
 lookups in two documents. The planner splits it, fans the sub-queries out, then
 caps how many chunks any one document may contribute — which is what lets an
-answer connect two files instead of drowning in the chattiest one.
+answer connect two files instead of drowning in the chattiest one. A question
+that is *not* multi-part is searched as asked: a small model invited to decide
+"is this complex?" will invent generic web queries ("resume writing tips") that
+no personal library contains, and every one of those dilutes retrieval. So the
+planner only runs on questions with an actual connective in them, and its
+output is filtered against the question and the library before it is used.
+
+**You choose the model, and it says which one it is.** Six models from 360
+million to 7 billion parameters, each listed with its maker and the video
+memory it needs. The choice is remembered, the loaded model is named in the
+answer bar and recorded on every saved turn, and switching frees the old one
+first. An app that claims to run entirely on your machine should be able to
+tell you exactly what it is running.
+
+**Chats are saved and never quietly dropped.** Conversations live in IndexedDB
+with their evidence, follow-up questions can refer back to earlier turns, and
+nothing expires, is capped, or is cleaned up in the background. A chat goes
+away when you delete it, and not otherwise.
 
 **Failure is surfaced, not swallowed.** The Search Coach watches for the three
 ways local RAG fails quietly — the model refusing, the evidence being weak, the
@@ -48,7 +65,8 @@ only after a human says yes.
 |---|---|
 | **Reads** | PDF, DOCX, XLSX/XLS/ODS, PPTX, plain text, Markdown, CSV/TSV, JSON, YAML, HTML, and ~18 code extensions |
 | **Retrieves** | `all-MiniLM-L6-v2` embeddings (384-dim) + MiniSearch keyword index, fused with RRF; ~500-char chunks, 50-char overlap |
-| **Answers** | Llama 3.2 3B via WebLLM on WebGPU, with inline `[filename]` citations |
+| **Answers** | Your pick of six models (SmolLM2 360M → Mistral 7B) via WebLLM on WebGPU, with inline `[filename]` citations |
+| **Remembers chats** | Saved conversations with their evidence; follow-ups carry earlier turns into both the prompt and the search |
 | **Notices** | Exact duplicates (content hash) and near-duplicates (document embedding), with a word-level diff naming what actually changed |
 | **Remembers** | Per-document topic profiles, and which documents actually answer your questions |
 | **Organizes** | Read-only folder scan → classification → filing plan preview |
