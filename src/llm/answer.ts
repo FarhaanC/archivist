@@ -11,6 +11,8 @@ import {
     recordQuery,
 } from '@/knowledge/usage-memory';
 import { STOP_WORDS } from '@/search/constants';
+import { makeSnippet } from '@/search/snippet';
+import { contentWordList } from '@/search/words';
 import type { EmbeddingWorker, SearchResult } from '@/search/types';
 
 /**
@@ -19,8 +21,9 @@ import type { EmbeddingWorker, SearchResult } from '@/search/types';
  *
  * The order matters. Retrieval runs whether or not the language model is
  * loaded — a user who just wants to find the paragraph should never wait for a
- * gigabyte of weights — and every LLM step below is wrapped so that a failure
- * degrades to "here are the passages" instead of an error.
+ * gigabyte of weights — and every LLM step below degrades to "here are the
+ * passages" instead of an error. Degrading is not the same as going quiet:
+ * every path that produces no answer says why, in `failure`.
  */
 
 const SYSTEM_PROMPT = `You answer questions using ONLY the excerpts provided from the user's own documents.
@@ -34,35 +37,110 @@ Rules:
 /** Below this fused score, the top hit is not real evidence. */
 export const WEAK_EVIDENCE_THRESHOLD = 1.2;
 
+/** Why no answer was produced. `null` when there is an answer. */
+export type AnswerFailure =
+    | { kind: 'model-not-loaded' }
+    | { kind: 'no-results' }
+    | { kind: 'generation-failed'; detail: string };
+
 export interface AnswerResult {
+    /** The question as asked, kept so evidence can be highlighted against it. */
+    question: string;
     answer: string;
+    failure: AnswerFailure | null;
     results: SearchResult[];
     subQueries: string[];
     alternatives: { docId: number; title: string; snippet: string }[];
     coach: CoachAdvice | null;
 }
 
+export interface ChatMessage {
+    role: 'system' | 'user' | 'assistant';
+    content: string;
+}
+
+/** A prior turn, as the model should see it. */
+export interface PriorTurn {
+    role: 'user' | 'assistant';
+    content: string;
+}
+
+/**
+ * What to actually search for.
+ *
+ * A follow-up like "and what about the 2024 one?" is meaningless to a search
+ * index on its own — it has almost no words that name anything. When the
+ * question is that short and there is a previous question to lean on, the two
+ * are searched together. The model still sees the follow-up as asked; only
+ * retrieval gets the expanded form.
+ */
+/** Below this many meaningful words, a question cannot stand on its own as a
+ *  search query. Three is the smallest number that leaves normal short
+ *  questions ("what does my lease say about subletting") untouched. */
+const SELF_CONTAINED_WORDS = 3;
+
+export const retrievalQuery = (question: string, history: PriorTurn[] = []): string => {
+    if (contentWordList(question).length >= SELF_CONTAINED_WORDS) return question;
+
+    const previousQuestion = [...history].reverse().find((turn) => turn.role === 'user');
+    if (!previousQuestion) return question;
+
+    return `${previousQuestion.content} ${question}`;
+};
+
 const buildContext = (results: SearchResult[]): string =>
     results
         .map((r, index) => `[${index + 1}] (${r.filename})\n${r.text}`)
         .join('\n\n');
 
+/**
+ * The exact message list sent to the model.
+ *
+ * Exported and pure so its shape can be asserted in tests. That matters:
+ * WebLLM rejects a request outright if a `system` message appears anywhere
+ * but index 0, and this pipeline previously sent two system messages — the
+ * prompt and the library inventory — which meant every single answer failed
+ * before a token was generated. The inventory is now folded into the one
+ * system message.
+ */
+export const buildMessages = (
+    question: string,
+    evidence: SearchResult[],
+    inventoryText: string,
+    history: PriorTurn[] = [],
+): ChatMessage[] => [
+    {
+        role: 'system',
+        content: `${SYSTEM_PROMPT}\n\n${inventoryText}`,
+    },
+    // Earlier turns, so "what about the other one?" means something. Trimmed
+    // by the caller: the context window has to leave room for the evidence.
+    ...history.map((turn) => ({ role: turn.role, content: turn.content })),
+    {
+        role: 'user',
+        content: `Excerpts from my documents:\n\n${buildContext(evidence)}\n\nQuestion: ${question}`,
+    },
+];
+
 export interface AskOptions {
     /** How many times the user has asked something similar in a row. */
     repeatCount?: number;
     onToken?: (partial: string) => void;
+    /** Earlier turns of this conversation, oldest first. */
+    history?: PriorTurn[];
 }
 
 export const ask = async (
     question: string,
     worker: EmbeddingWorker,
-    { repeatCount = 0, onToken }: AskOptions = {},
+    { repeatCount = 0, onToken, history = [] }: AskOptions = {},
 ): Promise<AnswerResult> => {
     recordQuery(question, STOP_WORDS);
 
     const inventory = await buildEnrichedInventory();
+    const searchFor = retrievalQuery(question, history);
     const subQueries = await decomposeQuery(
-        question,
+        searchFor,
         inventory.map((line) => line.title),
         getUserProfileSummary(),
     );
@@ -79,13 +157,15 @@ export const ask = async (
         .map((r) => ({
             docId: r.docId,
             title: r.filename,
-            snippet: r.text.slice(0, 160),
+            snippet: makeSnippet(r.text, searchFor, 160),
         }));
 
     const engine = getEngine();
     if (!engine) {
         return {
+            question,
             answer: '',
+            failure: { kind: 'model-not-loaded' },
             results,
             subQueries,
             alternatives,
@@ -96,7 +176,9 @@ export const ask = async (
     if (results.length === 0) {
         recordFailedQuestion(question);
         return {
-            answer: 'Nothing in your library matched that question.',
+            question,
+            answer: '',
+            failure: { kind: 'no-results' },
             results,
             subQueries,
             alternatives,
@@ -111,17 +193,12 @@ export const ask = async (
         const stream = await engine.chat.completions.create({
             stream: true,
             temperature: 0.2,
-            messages: [
-                { role: 'system', content: SYSTEM_PROMPT },
-                {
-                    role: 'system',
-                    content: formatInventoryChunk(inventory),
-                },
-                {
-                    role: 'user',
-                    content: `Excerpts from my documents:\n\n${buildContext(evidence)}\n\nQuestion: ${question}`,
-                },
-            ],
+            messages: buildMessages(
+                question,
+                evidence,
+                formatInventoryChunk(inventory),
+                history,
+            ),
         });
 
         for await (const part of stream) {
@@ -131,8 +208,31 @@ export const ask = async (
             onToken?.(answer);
         }
     } catch (error) {
-        console.warn('[answer] generation failed, returning passages only', error);
-        return { answer: '', results, subQueries, alternatives, coach: null };
+        // Surfaced, not swallowed. A generation failure that shows the user an
+        // empty panel is indistinguishable from a broken app.
+        const detail = error instanceof Error ? error.message : String(error);
+        console.error('[answer] generation failed', error);
+        return {
+            question,
+            answer: '',
+            failure: { kind: 'generation-failed', detail },
+            results,
+            subQueries,
+            alternatives,
+            coach: null,
+        };
+    }
+
+    if (!answer.trim()) {
+        return {
+            question,
+            answer: '',
+            failure: { kind: 'generation-failed', detail: 'The model returned an empty response.' },
+            results,
+            subQueries,
+            alternatives,
+            coach: null,
+        };
     }
 
     recordEvidenceDocs(evidence.map((r) => r.filename));
@@ -148,5 +248,5 @@ export const ask = async (
     );
     if (coach) recordFailedQuestion(question);
 
-    return { answer, results, subQueries, alternatives, coach };
+    return { question, answer, failure: null, results, subQueries, alternatives, coach };
 };
