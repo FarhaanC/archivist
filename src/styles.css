@@ -148,3 +148,51 @@ ul.plain li { padding: 9px 0; border-top: 1px solid var(--border); }
 ul.plain li:first-child { border-top: none; }
 
 .scroll { overflow-x: auto; }
+
+/* Selects. Previously unstyled, which meant the one dropdown in the app
+   rendered as a raw platform control among a page of custom ones. Same box,
+   padding and focus ring as the text inputs, with the native arrow replaced
+   so it can follow the theme. */
+select {
+    font: inherit;
+    color: var(--text);
+    background-color: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 9px 34px 9px 12px;
+    width: 100%;
+    cursor: pointer;
+    appearance: none;
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'><path d='M2.5 4.5 6 8l3.5-3.5' fill='none' stroke='%236c6760' stroke-width='1.4' stroke-linecap='round' stroke-linejoin='round'/></svg>");
+    background-repeat: no-repeat;
+    background-position: right 11px center;
+    transition: border-color 120ms ease;
+}
+select:hover:not(:disabled) { border-color: var(--text-dim); }
+select:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+select:disabled { opacity: 0.5; cursor: default; }
+/* Windows and Linux paint the option list with the page's colours, not the
+   control's, so they have to be set explicitly or dark mode shows white rows. */
+select option { background: var(--surface); color: var(--text); }
+
+@media (prefers-color-scheme: dark) {
+    select {
+        background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'><path d='M2.5 4.5 6 8l3.5-3.5' fill='none' stroke='%239a948a' stroke-width='1.4' stroke-linecap='round' stroke-linejoin='round'/></svg>");
+    }
+}
+
+/* A control and its actions on one line, wrapping to a stack when narrow. */
+.field-label { font-size: 12.5px; color: var(--text-dim); }
+.field-row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.field-row > select { flex: 1 1 240px; width: auto; }
+.field-row > button { flex: 0 0 auto; }
+
+/* Standing explanation under a group of controls, set apart from them. */
+.footnote {
+    font-size: 12.5px;
+    line-height: 1.5;
+    color: var(--text-dim);
+    border-top: 1px solid var(--border);
+    padding-top: 10px;
+    margin: 4px 0 0;
+}
