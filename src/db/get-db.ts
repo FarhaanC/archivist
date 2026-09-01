@@ -1,5 +1,10 @@
 import Dexie, { type EntityTable } from 'dexie';
-import type { ChunkRecord, DocumentRecord } from '@/db/types';
+import type {
+    ChunkRecord,
+    ConversationRecord,
+    DocumentRecord,
+    MessageRecord,
+} from '@/db/types';
 
 /**
  * The whole store. IndexedDB only — there is no server and no sync.
@@ -12,12 +17,22 @@ import type { ChunkRecord, DocumentRecord } from '@/db/types';
 export class ArchivistDb extends Dexie {
     documents!: EntityTable<DocumentRecord, 'id'>;
     chunks!: EntityTable<ChunkRecord, 'id'>;
+    conversations!: EntityTable<ConversationRecord, 'id'>;
+    messages!: EntityTable<MessageRecord, 'id'>;
 
     constructor() {
         super('archivist');
         this.version(1).stores({
             documents: '++id, title, uploadedAt, contentHash',
             chunks: '++id, docId, ordinal',
+        });
+        // v2 adds saved conversations. Dexie carries the existing tables
+        // forward untouched, so upgrading never costs anyone their library.
+        this.version(2).stores({
+            documents: '++id, title, uploadedAt, contentHash',
+            chunks: '++id, docId, ordinal',
+            conversations: '++id, updatedAt',
+            messages: '++id, conversationId, [conversationId+ordinal]',
         });
     }
 }

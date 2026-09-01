@@ -196,3 +196,51 @@ select option { background: var(--surface); color: var(--text); }
     padding-top: 10px;
     margin: 4px 0 0;
 }
+
+/* Saved conversations: a list beside the transcript. Collapses to a single
+   column on narrow screens, where the chat list moves above the transcript. */
+.chat-layout {
+    display: grid;
+    grid-template-columns: 220px minmax(0, 1fr);
+    gap: 16px;
+    align-items: start;
+}
+@media (max-width: 780px) {
+    .chat-layout { grid-template-columns: minmax(0, 1fr); }
+}
+
+.chat-sidebar { position: sticky; top: 16px; display: flex; flex-direction: column; gap: 10px; }
+.chat-list { display: flex; flex-direction: column; gap: 2px; max-height: 55vh; overflow-y: auto; }
+
+.chat-item {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    border-radius: var(--radius);
+    padding: 1px;
+}
+.chat-item:hover { background: var(--surface-2); }
+.chat-item.active { background: var(--accent-soft); }
+
+.chat-open {
+    flex: 1;
+    min-width: 0;
+    text-align: left;
+    font-size: 13px;
+    padding: 6px 8px;
+    color: var(--text);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* Actions stay out of the way until the row is touched, so the list reads as
+   a list of names rather than a wall of buttons. */
+.chat-actions { display: none; gap: 2px; padding-right: 4px; }
+.chat-item:hover .chat-actions,
+.chat-item.active .chat-actions { display: flex; }
+.chat-actions button { padding: 3px 6px; font-size: 11.5px; }
+
+.chat-main { display: flex; flex-direction: column; gap: 12px; }
+.turn-user { background: var(--surface-2); }
+.turn-user .answer { font-weight: 520; }

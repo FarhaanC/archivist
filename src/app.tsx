@@ -18,6 +18,9 @@ const TABS: { id: Tab; label: string }[] = [
 export const App = (): JSX.Element => {
     const [tab, setTab] = useState<Tab>('ask');
     const [docCount, setDocCount] = useState(0);
+    // Bumped when the loaded model changes, so panels that name the model
+    // re-render rather than showing a stale one.
+    const [modelTick, setModelTick] = useState(0);
     const workerRef = useRef<WorkerClient | null>(null);
 
     const worker = useMemo(() => {
@@ -59,14 +62,18 @@ export const App = (): JSX.Element => {
                 ))}
             </nav>
 
-            {tab === 'ask' && <AskPanel worker={worker} docCount={docCount} />}
+            {/* modelTick is read here only so a model change re-renders the
+                panel, which names the model that will answer. */}
+            {tab === 'ask' && (
+                <AskPanel worker={worker} docCount={docCount} modelTick={modelTick} />
+            )}
             {tab === 'library' && (
                 <LibraryPanel worker={worker} onChange={() => void refreshCount()} />
             )}
             {tab === 'organize' && <OrganizePanel />}
 
             <div className="card" style={{ marginTop: 24 }}>
-                <ModelStatus />
+                <ModelStatus onChange={() => setModelTick((n) => n + 1)} />
             </div>
         </div>
     );
