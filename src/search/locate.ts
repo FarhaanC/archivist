@@ -94,9 +94,22 @@ export const findSupportingSentence = (
     text: string,
     answer: string,
     question: string = '',
-): TextRange | null => {
+): TextRange | null => findSupportingSentences(text, answer, question, 1)[0] ?? null;
+
+/**
+ * Every sentence that supports the answer, best first, at most `max` — for
+ * an answer that rests on two places in one document ("seven days during
+ * probation, thirty days after"), both are marked. Falls back to the single
+ * best question match when nothing supports the answer.
+ */
+export const findSupportingSentences = (
+    text: string,
+    answer: string,
+    question: string = '',
+    max: number = 3,
+): TextRange[] => {
     const sentences = splitSentences(text);
-    if (sentences.length === 0) return null;
+    if (sentences.length === 0) return [];
 
     const answerWords = evidenceWords(answer);
     const questionWords = evidenceWords(question);
@@ -132,19 +145,28 @@ export const findSupportingSentence = (
 
     const supports = (s: (typeof scored)[number]): boolean => s.fromAnswer >= 2 || s.numbers >= 1;
 
-    let best = scored.filter(supports).sort(
+    const supporting = scored.filter(supports).sort(
         (a, b) =>
             b.numbers - a.numbers ||
             b.answerWeight - a.answerWeight ||
             b.questionWeight - a.questionWeight ||
             a.sentence.start - b.sentence.start,
-    )[0];
+    );
 
-    if (!best) {
-        best = scored
-            .filter((s) => s.fromQuestion >= 1)
-            .sort((a, b) => b.questionWeight - a.questionWeight || a.sentence.start - b.sentence.start)[0];
+    if (supporting.length > 0) {
+        // A second sentence has to carry real weight of its own — at least
+        // half the best one's — or it is just the best one's words echoed
+        // somewhere else in the document.
+        const floor = (supporting[0] as (typeof scored)[number]).answerWeight / 2;
+        return supporting
+            .filter((s, index) => index === 0 || s.answerWeight >= floor)
+            .slice(0, max)
+            .map((s) => ({ start: s.sentence.start, end: s.sentence.end }));
     }
 
-    return best ? { start: best.sentence.start, end: best.sentence.end } : null;
+    const fallback = scored
+        .filter((s) => s.fromQuestion >= 1)
+        .sort((a, b) => b.questionWeight - a.questionWeight || a.sentence.start - b.sentence.start)[0];
+
+    return fallback ? [{ start: fallback.sentence.start, end: fallback.sentence.end }] : [];
 };

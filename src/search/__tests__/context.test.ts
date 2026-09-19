@@ -3,17 +3,20 @@ import { db } from '@/db/get-db';
 import {
     buildSources,
     chooseSources,
+    extraSections,
+    groupRuns,
     joinChunks,
     neighbourOrdinals,
+    SECTION_GAP,
     shouldSendWhole,
     WHOLE_DOCUMENT_LIMIT,
 } from '@/search/context';
 import type { SearchResult } from '@/search/types';
 
-const hit = (id: number, docId: number, filename: string, text: string): SearchResult => ({
+const hit = (id: number, docId: number, filename: string, text: string, score = '1.50'): SearchResult => ({
     id,
     docId,
-    score: '1.50',
+    score,
     text,
     filename,
     debug: { vector: '0.7', keyword: '0.6' },
@@ -36,6 +39,41 @@ describe('chooseSources', () => {
 
     test('nothing matched means nothing to send', () => {
         expect(chooseSources([], 3)).toEqual([]);
+    });
+});
+
+describe('extraSections', () => {
+    test('keeps a second strong match from the same document', () => {
+        const results = [
+            hit(1, 10, 'contract.pdf', 'seven-day notice', '1.63'),
+            hit(2, 10, 'contract.pdf', 'thirty days notice', '1.55'),
+            hit(3, 11, 'letter.pdf', 'other file', '1.50'),
+        ];
+        const chosen = chooseSources(results, 3);
+        expect(extraSections(results, chosen).map((r) => r.id)).toEqual([2]);
+    });
+
+    test('drops a weak second match', () => {
+        const results = [
+            hit(1, 10, 'contract.pdf', 'strong', '1.63'),
+            hit(2, 10, 'contract.pdf', 'weak', '0.90'),
+        ];
+        expect(extraSections(results, chooseSources(results, 3))).toEqual([]);
+    });
+
+    test('never takes more than the cap per document', () => {
+        const results = [1, 2, 3, 4].map((n) => hit(n, 10, 'contract.pdf', `part ${n}`, '1.60'));
+        expect(extraSections(results, chooseSources(results, 3))).toHaveLength(1);
+    });
+});
+
+describe('groupRuns', () => {
+    test('adjacent pieces become one run, distant ones separate runs', () => {
+        expect(groupRuns([5, 3, 4, 9, 10, 11])).toEqual([[3, 4, 5], [9, 10, 11]]);
+    });
+
+    test('duplicates are harmless', () => {
+        expect(groupRuns([2, 2, 3])).toEqual([[2, 3]]);
     });
 });
 
@@ -143,6 +181,61 @@ describe('buildSources', () => {
         expect(sources[0]?.text).toContain('voice agent');
         // …and the unrelated section two pieces away does not.
         expect(sources[0]?.text).not.toContain('Unrelated later section');
+    });
+
+    /**
+     * The notice-period case. Two sections of one contract answer the same
+     * question under two conditions; the second must reach the model.
+     */
+    test('a long document sends two strong matches as two sections with a visible gap', async () => {
+        const docId = (await db.documents.add({
+            title: 'contract.pdf',
+            fullText: 'x'.repeat(WHOLE_DOCUMENT_LIMIT + 500),
+            uploadedAt: Date.now(),
+        })) as number;
+        await db.chunks.bulkAdd([
+            { docId, ordinal: 0, text: 'Opening.', vector: [] },
+            { docId, ordinal: 1, text: 'Probation: Seven-day Notice.', vector: [] },
+            { docId, ordinal: 2, text: 'Emails to customers are not allowed.', vector: [] },
+            { docId, ordinal: 3, text: 'Salary is paid monthly.', vector: [] },
+            { docId, ordinal: 4, text: 'Confidentiality applies.', vector: [] },
+            { docId, ordinal: 5, text: 'Post probation: Thirty days Notice.', vector: [] },
+            { docId, ordinal: 6, text: 'Holidays: one month.', vector: [] },
+            { docId, ordinal: 7, text: 'Signed.', vector: [] },
+        ]);
+        const first = await db.chunks.where({ docId, ordinal: 1 }).first();
+        const second = await db.chunks.where({ docId, ordinal: 5 }).first();
+
+        const sources = await buildSources([
+            hit(first?.id as number, docId, 'contract.pdf', 'Probation: Seven-day Notice.', '1.63'),
+            hit(second?.id as number, docId, 'contract.pdf', 'Post probation: Thirty days Notice.', '1.55'),
+        ]);
+
+        expect(sources).toHaveLength(1);
+        expect(sources[0]?.sections).toBe(2);
+        expect(sources[0]?.text).toContain('Seven-day Notice');
+        expect(sources[0]?.text).toContain('Thirty days Notice');
+        expect(sources[0]?.text).toContain(SECTION_GAP.trim());
+        expect(sources[0]?.text).not.toContain('Salary is paid monthly');
+    });
+
+    test('two matches that sit next to each other merge into one longer window', async () => {
+        const docId = (await db.documents.add({
+            title: 'contract.pdf',
+            fullText: 'x'.repeat(WHOLE_DOCUMENT_LIMIT + 500),
+            uploadedAt: Date.now(),
+        })) as number;
+        await db.chunks.bulkAdd([0, 1, 2, 3, 4].map((n) => ({ docId, ordinal: n, text: `Piece ${n}.`, vector: [] })));
+        const a = await db.chunks.where({ docId, ordinal: 1 }).first();
+        const b = await db.chunks.where({ docId, ordinal: 3 }).first();
+
+        const sources = await buildSources([
+            hit(a?.id as number, docId, 'contract.pdf', 'Piece 1.', '1.60'),
+            hit(b?.id as number, docId, 'contract.pdf', 'Piece 3.', '1.58'),
+        ]);
+
+        expect(sources[0]?.sections).toBe(1);
+        expect(sources[0]?.text).toBe('Piece 0. Piece 1. Piece 2. Piece 3. Piece 4.');
     });
 
     test('a short document is sent whole, with no boundaries at all', async () => {

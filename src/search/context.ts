@@ -35,6 +35,20 @@ export const NEIGHBOUR_RADIUS = 1;
  *  much larger, and the model holds roughly 4,000 words in total. */
 export const MAX_SOURCES = 3;
 
+/**
+ * How many matched sections of ONE document may be sent, and how strong the
+ * second has to be relative to the first.
+ *
+ * One section per document was the rule, and it produced a wrong answer on
+ * a real contract: "what is the notice period?" matched two sections — seven
+ * days during probation, thirty days after — and the second was thrown away
+ * because the first had claimed the document's one slot. The model answered
+ * "seven days" with no idea a second rule existed. A document that answers a
+ * question twice, under two conditions, has to be allowed to say so.
+ */
+export const MAX_SECTIONS_PER_DOCUMENT = 2;
+export const SECOND_SECTION_RATIO = 0.8;
+
 export interface ContextSource {
     docId: number;
     filename: string;
@@ -45,6 +59,8 @@ export interface ContextSource {
     /** How it was assembled — reported to the user, because what the model
      *  read and what the user is shown must be the same thing. */
     kind: 'whole-document' | 'window';
+    /** How many separate matched sections a window joins. 1 for most. */
+    sections: number;
 }
 
 /**
@@ -69,6 +85,57 @@ export const chooseSources = <T extends { docId: number }>(
 
     return chosen;
 };
+
+const numeric = (score: string): number => {
+    const value = Number.parseFloat(score);
+    return Number.isFinite(value) ? value : 0;
+};
+
+/**
+ * Further strong matches from the same documents as `chosen`, best first,
+ * at most MAX_SECTIONS_PER_DOCUMENT - 1 per document and only when they score
+ * close to that document's best. A weak second match would drag in a section
+ * the question is not about, and cost context that a third document needs.
+ */
+export const extraSections = <T extends { docId: number; id: number; score: string }>(
+    results: T[],
+    chosen: T[],
+): T[] => {
+    const best = new Map<number, T>();
+    for (const c of chosen) best.set(c.docId, c);
+
+    const taken = new Map<number, number>();
+    const extras: T[] = [];
+    for (const result of results) {
+        const top = best.get(result.docId);
+        if (!top || result.id === top.id) continue;
+        if ((taken.get(result.docId) ?? 0) >= MAX_SECTIONS_PER_DOCUMENT - 1) continue;
+        if (numeric(result.score) < numeric(top.score) * SECOND_SECTION_RATIO) continue;
+        taken.set(result.docId, (taken.get(result.docId) ?? 0) + 1);
+        extras.push(result);
+    }
+    return extras;
+};
+
+/**
+ * Split ordinals into runs of consecutive pieces. Two matched sections that
+ * sit next to each other become one longer window; two far apart become two
+ * windows joined with a visible gap, so the model does not read across the
+ * cut as if it were continuous prose.
+ */
+export const groupRuns = (ordinals: number[]): number[][] => {
+    const sorted = [...new Set(ordinals)].sort((a, b) => a - b);
+    const runs: number[][] = [];
+    for (const ordinal of sorted) {
+        const current = runs[runs.length - 1];
+        if (current && ordinal === (current[current.length - 1] as number) + 1) current.push(ordinal);
+        else runs.push([ordinal]);
+    }
+    return runs;
+};
+
+/** Marks the cut between two sections of the same document. */
+export const SECTION_GAP = ' […] ';
 
 /** The positions to fetch around a match, never below zero. */
 export const neighbourOrdinals = (
@@ -133,6 +200,7 @@ export const buildSources = async (
 ): Promise<ContextSource[]> => {
     const chosen = chooseSources(results, max);
     if (chosen.length === 0) return [];
+    const extras = extraSections(results, chosen);
 
     await ensureDbOpen();
 
@@ -144,6 +212,7 @@ export const buildSources = async (
                 score: hit.score,
                 text: hit.text,
                 kind: 'window',
+                sections: 1,
             };
 
             try {
@@ -156,18 +225,31 @@ export const buildSources = async (
                     };
                 }
 
-                const matched = await db.chunks.get(hit.id);
-                if (!matched) return fallback;
+                const matchedIds = [hit, ...extras.filter((e) => e.docId === hit.docId)].map((h) => h.id);
+                const matchedChunks = (await db.chunks.bulkGet(matchedIds)).filter(
+                    (chunk): chunk is ChunkRecord => chunk !== undefined,
+                );
+                if (matchedChunks.length === 0) return fallback;
 
-                const wanted = new Set(neighbourOrdinals(matched.ordinal));
-                const neighbours = await db.chunks
+                const wanted = new Set(matchedChunks.flatMap((chunk) => neighbourOrdinals(chunk.ordinal)));
+                const pieces = await db.chunks
                     .where('docId')
                     .equals(hit.docId)
                     .and((chunk) => wanted.has(chunk.ordinal))
                     .toArray();
+                const byOrdinal = new Map(pieces.map((piece) => [piece.ordinal, piece]));
 
-                const text = joinChunks(neighbours.length ? neighbours : [matched]);
-                return { ...fallback, text: text || hit.text };
+                const runs = groupRuns(pieces.map((piece) => piece.ordinal));
+                const text = runs
+                    .map((run) => joinChunks(run.map((ordinal) => byOrdinal.get(ordinal) as ChunkRecord)))
+                    .filter(Boolean)
+                    .join(SECTION_GAP);
+
+                return {
+                    ...fallback,
+                    text: text || joinChunks(matchedChunks) || hit.text,
+                    sections: Math.max(1, runs.length),
+                };
             } catch {
                 return fallback;
             }

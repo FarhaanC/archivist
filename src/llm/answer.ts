@@ -33,6 +33,8 @@ Write a direct answer in your own plain sentences. Put [filename] after each fac
 
 Use only what the excerpts say. Do not add general knowledge. Do not move a name, employer or date from one excerpt onto something in another. Do not say what the user has not done — you are shown a few passages, not whole documents.
 
+If the excerpts answer the question more than once under different conditions — one notice period during probation and another after it, one fee before a date and another after — give every answer, each with its condition. Never report only the first one you find. An excerpt may contain " […] " where a section was cut; the text either side of it is not continuous.
+
 Earlier turns show what the question refers to; the facts must still come from the excerpts below.
 
 If the excerpts genuinely do not answer the question, say which part is missing.`;

@@ -81,7 +81,9 @@ const Passage = ({
             <div className="passage-kind">
                 {hit.kind === 'whole-document'
                     ? 'whole document'
-                    : 'matched section, with the text either side'}
+                    : hit.sections && hit.sections > 1
+                      ? `${hit.sections} matched sections, each with the text either side`
+                      : 'matched section, with the text either side'}
             </div>
         )}
         <div className="passage-text">

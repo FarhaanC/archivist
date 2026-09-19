@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { db } from '@/db/get-db';
 import { ensureDbOpen } from '@/db/ensure-db-open';
 import { highlight } from '@/search/highlight';
-import { findSupportingSentence, type TextRange } from '@/search/locate';
+import { findSupportingSentences, type TextRange } from '@/search/locate';
 
 /**
  * The whole document, opened from a passage.
@@ -21,7 +21,8 @@ import { findSupportingSentence, type TextRange } from '@/search/locate';
 interface Loaded {
     text: string;
     readAsScan: boolean;
-    support: TextRange | null;
+    /** Sentences the answer rests on, best first; empty when none match. */
+    support: TextRange[];
 }
 
 const Paragraph = ({
@@ -35,27 +36,35 @@ const Paragraph = ({
     /** Where this paragraph starts in the full text. */
     offset: number;
     question: string;
-    support: TextRange | null;
+    support: TextRange[];
+    /** Called with the node of the FIRST supporting sentence, to scroll to. */
     supportRef: (node: HTMLElement | null) => void;
 }): JSX.Element => {
     const end = offset + text.length;
-    const overlaps = support && support.start < end && support.end > offset;
+    const inside = support
+        .filter((range) => range.start < end && range.end > offset)
+        .map((range) => ({
+            from: Math.max(0, range.start - offset),
+            to: Math.min(text.length, range.end - offset),
+            first: range === support[0],
+        }))
+        .sort((a, b) => a.from - b.from);
 
-    if (!overlaps || !support) {
-        return <p>{mark(text, question)}</p>;
+    if (inside.length === 0) return <p>{mark(text, question)}</p>;
+
+    const parts: JSX.Element[] = [];
+    let cursor = 0;
+    for (const [index, range] of inside.entries()) {
+        if (range.from > cursor) parts.push(<span key={`t${index}`}>{mark(text.slice(cursor, range.from), question)}</span>);
+        parts.push(
+            <mark className="supporting" key={`m${index}`} ref={range.first ? supportRef : undefined}>
+                {mark(text.slice(range.from, range.to), question)}
+            </mark>,
+        );
+        cursor = Math.max(cursor, range.to);
     }
-
-    const from = Math.max(0, support.start - offset);
-    const to = Math.min(text.length, support.end - offset);
-    return (
-        <p>
-            {mark(text.slice(0, from), question)}
-            <mark className="supporting" ref={supportRef}>
-                {mark(text.slice(from, to), question)}
-            </mark>
-            {mark(text.slice(to), question)}
-        </p>
-    );
+    if (cursor < text.length) parts.push(<span key="tail">{mark(text.slice(cursor), question)}</span>);
+    return <p>{parts}</p>;
 };
 
 const mark = (text: string, question: string): JSX.Element[] =>
@@ -104,7 +113,7 @@ export const DocumentView = ({
             setLoaded({
                 text: doc.fullText,
                 readAsScan: Boolean(doc.readAsScan),
-                support: findSupportingSentence(doc.fullText, answer, question),
+                support: findSupportingSentences(doc.fullText, answer, question),
             });
         })();
         return () => {
@@ -129,13 +138,15 @@ export const DocumentView = ({
                 </div>
                 {loaded && loaded !== 'missing' && (
                     <div className="small muted">
-                        {loaded.support
-                            ? answer
-                                ? 'The highlighted sentence is the one the answer rests on. Read around it.'
-                                : 'Highlighted: the sentence that best matches your question.'
-                            : answer
-                              ? 'No sentence here clearly matches the answer — worth reading with care.'
-                              : 'Nothing here matches your question closely.'}
+                        {loaded.support.length > 1
+                            ? `The ${loaded.support.length} highlighted sentences are the ones the answer rests on. Read around them.`
+                            : loaded.support.length === 1
+                              ? answer
+                                  ? 'The highlighted sentence is the one the answer rests on. Read around it.'
+                                  : 'Highlighted: the sentence that best matches your question.'
+                              : answer
+                                ? 'No sentence here clearly matches the answer — worth reading with care.'
+                                : 'Nothing here matches your question closely.'}
                         {loaded.readAsScan && ' This was read from a scan, so the odd word may be wrong.'}
                     </div>
                 )}

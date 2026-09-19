@@ -77,6 +77,7 @@ const assistantRow = (
                 : makeSnippet(source.text, result.question, 420),
             score: source.score,
             kind: source.kind,
+            sections: source.sections > 1 ? source.sections : undefined,
         };
     }),
     alternatives: result.alternatives.length ? result.alternatives : undefined,

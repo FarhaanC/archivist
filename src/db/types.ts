@@ -54,6 +54,8 @@ export interface StoredEvidence {
      *  joined with its neighbours. Recorded so the user can see what the
      *  model actually read, not just what matched. */
     kind?: 'whole-document' | 'window';
+    /** How many separate matched sections the window joined. */
+    sections?: number;
 }
 
 /** One turn in a conversation. */

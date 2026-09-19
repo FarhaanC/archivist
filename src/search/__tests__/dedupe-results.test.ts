@@ -36,3 +36,25 @@ describe('dedupeSimilarResults', () => {
         expect(out).toHaveLength(2);
     });
 });
+
+describe('dedupeSimilarResults within one document', () => {
+    const probation =
+        'During this period both the company and Employee have the option to terminate the contract with Seven-day Notice. The Employee dues will be immediately paid upon completion of handover.';
+    const after = probation.replace('During this period', 'Post three months of contract').replace('Seven-day', 'Thirty (30) days');
+
+    test('keeps two near-identical clauses of the SAME document — they differ in the number that matters', () => {
+        const out = dedupeSimilarResults([
+            { text: probation, docId: 7 },
+            { text: after, docId: 7 },
+        ]);
+        expect(out).toHaveLength(2);
+    });
+
+    test('still collapses the same clause repeated across two documents', () => {
+        const out = dedupeSimilarResults([
+            { text: probation, docId: 7 },
+            { text: probation, docId: 8 },
+        ]);
+        expect(out).toHaveLength(1);
+    });
+});

@@ -10,6 +10,7 @@ const hit = (id: number, filename: string, text: string): ContextSource => ({
     text,
     filename,
     kind: 'window',
+    sections: 1,
 });
 
 const evidence = [

@@ -24,15 +24,27 @@ const jaccard = (a: Set<string>, b: Set<string>): number => {
 
 export const SIMILAR_CHUNK_THRESHOLD = 0.85;
 
-/** Input must be sorted by score descending (highest first is kept). */
-export const dedupeSimilarResults = <T extends Pick<SearchResult, 'text'>>(
+/**
+ * Input must be sorted by score descending (highest first is kept).
+ *
+ * Only chunks from DIFFERENT documents are compared. Two near-identical
+ * chunks inside one document are not boilerplate — they are the contract
+ * that says "seven-day notice" in the probation clause and "thirty days'
+ * notice" in the clause after it, in otherwise the same words. Dropping the
+ * second is how the model came to answer "seven days" and nothing else.
+ */
+export const dedupeSimilarResults = <T extends Pick<SearchResult, 'text'> & { docId?: number }>(
     results: T[],
     threshold: number = SIMILAR_CHUNK_THRESHOLD
 ): T[] => {
     const kept: { result: T; tokens: Set<string> }[] = [];
     for (const r of results) {
         const tokens = tokenSet(r.text);
-        const isDupe = kept.some((k) => jaccard(tokens, k.tokens) >= threshold);
+        const isDupe = kept.some(
+            (k) =>
+                (r.docId === undefined || k.result.docId === undefined || k.result.docId !== r.docId) &&
+                jaccard(tokens, k.tokens) >= threshold,
+        );
         if (!isDupe) kept.push({ result: r, tokens });
     }
     return kept.map((k) => k.result);
