@@ -1,5 +1,6 @@
 import type { MLCEngineInterface } from '@mlc-ai/web-llm';
 import { DEFAULT_MODEL_ID, findModel } from '@/llm/models';
+import { describeModelProgress } from '@/llm/model-progress';
 
 /**
  * The answering model, running in the browser on WebGPU. Loading it is the
@@ -97,8 +98,11 @@ export const loadEngine = async (
             .then((webllm) =>
                 webllm.CreateMLCEngine(model, {
                     initProgressCallback: (report) => {
+                        // Reworded on the way through: what WebLLM says is
+                        // written for people who built it.
+                        const text = describeModelProgress(report.text);
                         for (const handler of progressHandlers) {
-                            handler({ text: report.text, progress: report.progress });
+                            handler({ text, progress: report.progress });
                         }
                     },
                 }),
