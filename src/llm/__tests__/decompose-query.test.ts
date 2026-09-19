@@ -78,3 +78,40 @@ describe('filterSubQueries', () => {
         expect(filterSubQueries(original, ['', 'ab', 'resume '.repeat(60)], titles)).toEqual([]);
     });
 });
+
+describe('follow-ups are never treated as multi-part', () => {
+    /**
+     * Asked "When did I work at Concert IDC?" and then "and the other one?",
+     * the planner saw the leading "and", read it as a connective joining two
+     * topics, and fanned the follow-up out into searches for a phrase with no
+     * subject in it. One passage came back and the answer was "there is no
+     * mention of Concert IDC in the provided excerpts".
+     */
+    test('a follow-up opening with a connective is one question', () => {
+        const followUps = [
+            'and the other one?',
+            'And the freelance one?',
+            'and what about 2024',
+            'but the older version?',
+        ];
+        for (const question of followUps) {
+            expect(looksMultiPart(question)).toBe(false);
+        }
+    });
+
+    test('a lone question mark is not two questions', () => {
+        expect(looksMultiPart('?')).toBe(false);
+        expect(looksMultiPart('??')).toBe(false);
+    });
+
+    test('a connective with real content on both sides still splits', () => {
+        expect(looksMultiPart('my lease notice period and my contract terms')).toBe(true);
+        expect(looksMultiPart('React vs Vue in my notes')).toBe(true);
+    });
+
+    test('two real questions still split', () => {
+        expect(
+            looksMultiPart('What did I do at Concert IDC? What did I do at Disrupt X?'),
+        ).toBe(true);
+    });
+});

@@ -47,6 +47,10 @@ export interface StoredEvidence {
     filename: string;
     snippet: string;
     score: string;
+    /** How this source was assembled: the whole document, or a matched piece
+     *  joined with its neighbours. Recorded so the user can see what the
+     *  model actually read, not just what matched. */
+    kind?: 'whole-document' | 'window';
 }
 
 /** One turn in a conversation. */

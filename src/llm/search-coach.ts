@@ -14,18 +14,30 @@ export interface CoachAdvice {
     suggestions: string[];
 }
 
+/**
+ * Phrases a model uses when it is giving up.
+ *
+ * The first version matched a short list of exact strings and missed "I cannot
+ * provide a direct answer" — so a turn that failed with the answer visible in
+ * the evidence beside it got no help at all. These are anchored on the model
+ * talking about itself ("I cannot…", "I don't have…") or about the excerpts,
+ * which keeps them from firing on a real answer that happens to contain the
+ * word "cannot": "you cannot end the lease early" is an answer, not a refusal.
+ */
+const REFUSAL_PATTERNS: RegExp[] = [
+    /\bi (?:cannot|can'?t|am unable to|was unable to)\b[^.]{0,40}\b(?:answer|provide|determine|find|tell|say|confirm|locate|extract)\b/i,
+    /\bi (?:do not|don'?t) (?:have|see|find)\b[^.]{0,40}\b(?:information|details|answer|evidence|mention)\b/i,
+    /\b(?:excerpts?|passages?|documents?|context|library)\b[^.]{0,30}\b(?:do(?:es)? not|don'?t) (?:contain|include|mention|specify|provide)\b/i,
+    /\bnot (?:contain|mentioned|specified|stated|provided|included) (?:in|within) (?:the )?(?:excerpts?|passages?|documents?|context)\b/i,
+    /\bnothing in (?:the )?(?:excerpts?|passages?|documents?|context|library|provided)\b/i,
+    /\b(?:no|insufficient|not enough) (?:relevant )?information\b/i,
+    /\bunable to (?:answer|determine|provide|find)\b/i,
+    /\bcannot answer\b|\bcan'?t answer\b/i,
+];
+
 /** Detects "I couldn't answer" style responses from the model. */
-export const looksLikeRefusal = (answer: string): boolean => {
-    const a = answer.toLowerCase();
-    return (
-        a.includes('cannot answer') ||
-        a.includes("can't answer") ||
-        a.includes('not contain') ||
-        a.includes('nothing in the context') ||
-        a.includes('no relevant') ||
-        a.includes('not mentioned in')
-    );
-};
+export const looksLikeRefusal = (answer: string): boolean =>
+    REFUSAL_PATTERNS.some((pattern) => pattern.test(answer));
 
 const SYSTEM_PROMPT_COACH = `You help a user search their personal document library. Their last question did not get a good answer.
 Given their question and excerpts of what the search engine DID find, suggest up to 3 alternative questions that the library can very likely answer, related to what the user seems to want.

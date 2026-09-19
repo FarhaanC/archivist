@@ -11,6 +11,7 @@ import {
     recordQuery,
 } from '@/knowledge/usage-memory';
 import { STOP_WORDS } from '@/search/constants';
+import { buildSources, type ContextSource } from '@/search/context';
 import { makeSnippet } from '@/search/snippet';
 import { contentWordList } from '@/search/words';
 import type { EmbeddingWorker, SearchResult } from '@/search/types';
@@ -26,13 +27,15 @@ import type { EmbeddingWorker, SearchResult } from '@/search/types';
  * every path that produces no answer says why, in `failure`.
  */
 
-const SYSTEM_PROMPT = `You answer questions using ONLY the excerpts provided from the user's own documents.
+const SYSTEM_PROMPT = `You answer questions from excerpts of the user's own documents — CVs, contracts, notes. The excerpts are often fragments rather than prose: headings, bullet points, a date sitting beside a job title. Read them as facts and report them.
 
-Rules:
-- Cite the source of every claim inline, as [filename].
-- If the excerpts do not contain the answer, say so plainly. Do not guess, and do not fall back on general knowledge.
-- Quote exact figures, dates, names and identifiers rather than paraphrasing them.
-- Be concise. Answer the question that was asked.`;
+Write a direct answer in your own plain sentences. Put [filename] after each fact, using the filename exactly as given.
+
+Use only what the excerpts say. Do not add general knowledge. Do not move a name, employer or date from one excerpt onto something in another. Do not say what the user has not done — you are shown a few passages, not whole documents.
+
+Earlier turns show what the question refers to; the facts must still come from the excerpts below.
+
+If the excerpts genuinely do not answer the question, say which part is missing.`;
 
 /** Below this fused score, the top hit is not real evidence. */
 export const WEAK_EVIDENCE_THRESHOLD = 1.2;
@@ -46,6 +49,10 @@ export type AnswerFailure =
 export interface AnswerResult {
     /** The question as asked, kept so evidence can be highlighted against it. */
     question: string;
+    /** What the model was actually given — matched pieces expanded with their
+     *  neighbours, or whole documents where they are short enough. Shown to
+     *  the user too: what it read and what you see must be the same thing. */
+    sources: ContextSource[];
     answer: string;
     failure: AnswerFailure | null;
     results: SearchResult[];
@@ -66,46 +73,45 @@ export interface PriorTurn {
 }
 
 /**
- * What to actually search for.
- *
- * A follow-up like "and what about the 2024 one?" is meaningless to a search
- * index on its own — it has almost no words that name anything. When the
- * question is that short and there is a previous question to lean on, the two
- * are searched together. The model still sees the follow-up as asked; only
- * retrieval gets the expanded form.
+ * Below this many meaningful words, a question is treated as possibly leaning
+ * on the one before it. Follow-ups are short by nature — "which of those is
+ * longer" carries two meaningful words, "the freelance version" two — while a
+ * question that names its own subject usually carries five or more.
  */
-/** Below this many meaningful words, a question cannot stand on its own as a
- *  search query. Three is the smallest number that leaves normal short
- *  questions ("what does my lease say about subletting") untouched. */
-const SELF_CONTAINED_WORDS = 3;
-
-export const retrievalQuery = (question: string, history: PriorTurn[] = []): string => {
-    if (contentWordList(question).length >= SELF_CONTAINED_WORDS) return question;
-
-    const previousQuestion = [...history].reverse().find((turn) => turn.role === 'user');
-    if (!previousQuestion) return question;
-
-    return `${previousQuestion.content} ${question}`;
-};
-
-const buildContext = (results: SearchResult[]): string =>
-    results
-        .map((r, index) => `[${index + 1}] (${r.filename})\n${r.text}`)
-        .join('\n\n');
+export const SELF_CONTAINED_WORDS = 5;
 
 /**
- * The exact message list sent to the model.
+ * What to actually search for.
  *
- * Exported and pure so its shape can be asserted in tests. That matters:
- * WebLLM rejects a request outright if a `system` message appears anywhere
- * but index 0, and this pipeline previously sent two system messages — the
- * prompt and the library inventory — which meant every single answer failed
- * before a token was generated. The inventory is now folded into the one
- * system message.
+ * A follow-up rarely repeats its subject. "And the other one?", "what about
+ * the freelance version", "which of those is longer", "the 2024 one" — none
+ * of them name a document, so searching them alone finds nothing useful.
+ *
+ * The first attempt at this looked for particular words, which only ever
+ * covers the phrasings you thought of. Instead: whenever a question is short
+ * enough that it might be leaning on the previous one, search BOTH — the
+ * question as typed, and the previous question with this one appended. The
+ * two result sets are merged and ranked together, so a question that stands
+ * on its own still wins on its own terms, and one that does not gets rescued.
+ * No list of follow-up words to keep up to date.
  */
+export const retrievalQueries = (question: string, history: PriorTurn[] = []): string[] => {
+    const previous = [...history].reverse().find((turn) => turn.role === 'user')?.content;
+    if (!previous) return [question];
+
+    // A long question carries its own subject; adding the previous one would
+    // only dilute it.
+    if (contentWordList(question).length >= SELF_CONTAINED_WORDS) return [question];
+
+    return [question, `${previous} ${question}`];
+};
+
+const buildContext = (sources: ContextSource[]): string =>
+    sources.map((s) => `From [${s.filename}]:\n${s.text}`).join('\n\n');
+
 export const buildMessages = (
     question: string,
-    evidence: SearchResult[],
+    evidence: ContextSource[],
     inventoryText: string,
     history: PriorTurn[] = [],
 ): ChatMessage[] => [
@@ -121,6 +127,19 @@ export const buildMessages = (
         content: `Excerpts from my documents:\n\n${buildContext(evidence)}\n\nQuestion: ${question}`,
     },
 ];
+
+/**
+ * What actually gets searched.
+ *
+ * The planner is only ever asked about the question as the user typed it,
+ * never about an expanded form: expanding "?" into "What is in my resumes ? ?"
+ * gave it two question marks, which the multi-part test read as two questions,
+ * and a bare "?" was fanned out into four unrelated searches.
+ *
+ * A real plan wins. Otherwise every retrieval query goes through.
+ */
+export const chooseQueries = (planned: string[], fallbacks: string[]): string[] =>
+    planned.length > 1 ? planned : fallbacks;
 
 export interface AskOptions {
     /** How many times the user has asked something similar in a row. */
@@ -138,12 +157,19 @@ export const ask = async (
     recordQuery(question, STOP_WORDS);
 
     const inventory = await buildEnrichedInventory();
-    const searchFor = retrievalQuery(question, history);
-    const subQueries = await decomposeQuery(
-        searchFor,
-        inventory.map((line) => line.title),
-        getUserProfileSummary(),
-    );
+    const queries = retrievalQueries(question, history);
+    // A question short enough to need the previous one is too short to split.
+    // Both exist for the same reason — it does not stand alone — and running
+    // them together fans a bare follow-up into unrelated searches.
+    const planned =
+        queries.length === 1
+            ? await decomposeQuery(
+                  question,
+                  inventory.map((line) => line.title),
+                  getUserProfileSummary(),
+              )
+            : [question];
+    const subQueries = chooseQueries(planned, queries);
 
     const retrieved = await searchMulti(subQueries, worker);
     const results = dedupeSimilarResults(retrieved);
@@ -157,13 +183,18 @@ export const ask = async (
         .map((r) => ({
             docId: r.docId,
             title: r.filename,
-            snippet: makeSnippet(r.text, searchFor, 160),
+            snippet: makeSnippet(r.text, question, 160),
         }));
+
+    // Assembled before the model is consulted, so every path — including the
+    // ones that produce no answer — can report the same passages.
+    const sources = await buildSources(results);
 
     const engine = getEngine();
     if (!engine) {
         return {
             question,
+            sources,
             answer: '',
             failure: { kind: 'model-not-loaded' },
             results,
@@ -177,6 +208,7 @@ export const ask = async (
         recordFailedQuestion(question);
         return {
             question,
+            sources,
             answer: '',
             failure: { kind: 'no-results' },
             results,
@@ -186,7 +218,6 @@ export const ask = async (
         };
     }
 
-    const evidence = results.slice(0, 5);
     let answer = '';
 
     try {
@@ -195,7 +226,7 @@ export const ask = async (
             temperature: 0.2,
             messages: buildMessages(
                 question,
-                evidence,
+                sources,
                 formatInventoryChunk(inventory),
                 history,
             ),
@@ -214,6 +245,7 @@ export const ask = async (
         console.error('[answer] generation failed', error);
         return {
             question,
+            sources,
             answer: '',
             failure: { kind: 'generation-failed', detail },
             results,
@@ -226,6 +258,7 @@ export const ask = async (
     if (!answer.trim()) {
         return {
             question,
+            sources,
             answer: '',
             failure: { kind: 'generation-failed', detail: 'The model returned an empty response.' },
             results,
@@ -235,18 +268,18 @@ export const ask = async (
         };
     }
 
-    recordEvidenceDocs(evidence.map((r) => r.filename));
+    recordEvidenceDocs(sources.map((s) => s.filename));
 
-    const topScore = Number.parseFloat(evidence[0]?.score ?? '0');
+    const topScore = Number.parseFloat(sources[0]?.score ?? '0');
     const coach = await coachTurn(
         question,
         answer,
         topScore,
-        evidence.map((r) => ({ title: r.filename, snippet: r.text.slice(0, 200) })),
+        sources.map((s) => ({ title: s.filename, snippet: s.text.slice(0, 200) })),
         repeatCount,
         WEAK_EVIDENCE_THRESHOLD,
     );
     if (coach) recordFailedQuestion(question);
 
-    return { question, answer, failure: null, results, subQueries, alternatives, coach };
+    return { question, sources, answer, failure: null, results, subQueries, alternatives, coach };
 };

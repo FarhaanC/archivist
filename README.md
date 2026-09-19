@@ -33,10 +33,13 @@ output is filtered against the question and the library before it is used.
 
 **The model loads itself, and says which one it is.** Nobody should have to
 know what a parameter is to ask a question, so the first question fetches a
-model on its own — Llama 3.2 1B by default, small enough to arrive quickly and
-to run on weak graphics hardware. Not on page load, though: search works
-without a model, and someone who only wanted to search should never pay for a
-gigabyte they did not ask for. Six models are offered, from 360 million to 7
+model on its own — Llama 3.2 3B by default. Not on page load, though: search
+works without a model, and someone who only wanted to search should never pay
+for a download they did not ask for. The default was the 1B until testing
+against real CVs settled it: asked when the user had worked somewhere, with
+the dates highlighted in the evidence beside it, the 1B replied "I cannot
+provide a direct answer". Personal documents are dense fragments rather than
+prose, and the smaller model gives up on them. Six models are offered, from 360 million to 7
 billion parameters, each listed with what it is good for, its maker and the
 video memory it needs. The choice is remembered, the loaded model is named in
 the answer bar and recorded on every saved turn, and switching frees the old
@@ -70,7 +73,7 @@ only after a human says yes.
 |---|---|
 | **Reads** | PDF, DOCX, XLSX/XLS/ODS, PPTX, plain text, Markdown, CSV/TSV, JSON, YAML, HTML, and ~18 code extensions |
 | **Retrieves** | `all-MiniLM-L6-v2` embeddings (384-dim) + MiniSearch keyword index, fused with RRF; ~500-char chunks, 50-char overlap |
-| **Answers** | Llama 3.2 1B by default, fetched on your first question; five others from SmolLM2 360M to Mistral 7B. WebLLM on WebGPU, inline `[filename]` citations |
+| **Answers** | Llama 3.2 3B by default, fetched on your first question; five others from SmolLM2 360M to Mistral 7B. WebLLM on WebGPU, inline `[filename]` citations |
 | **Remembers chats** | Saved conversations with their evidence; follow-ups carry earlier turns into both the prompt and the search |
 | **Notices** | Exact duplicates (content hash) and near-duplicates (document embedding), with a word-level diff naming what actually changed |
 | **Remembers** | Per-document topic profiles, and which documents actually answer your questions |

@@ -48,7 +48,7 @@ export const MODEL_OPTIONS: ModelOption[] = [
         size: '1 billion',
         memoryMb: 879,
         maker: 'Meta',
-        note: 'The one that loads by default. Fast on almost any machine, and its answers stay close to what your documents actually say — which is the point here.',
+        note: 'Quickest to load and runs almost anywhere, but it gives up easily on dense documents like CVs. Worth trying if the default is too slow on your machine.',
     },
     {
         id: 'Qwen3-1.7B-q4f16_1-MLC',
@@ -66,7 +66,7 @@ export const MODEL_OPTIONS: ModelOption[] = [
         size: '3 billion',
         memoryMb: 2264,
         maker: 'Meta',
-        note: 'Worth the extra wait if you often ask questions that span several documents at once.',
+        note: 'The one that loads by default. Reads fragmentary documents — CVs, forms, contracts — where smaller models decline to.',
     },
     {
         id: 'Phi-3.5-mini-instruct-q4f16_1-MLC',
@@ -91,13 +91,15 @@ export const MODEL_OPTIONS: ModelOption[] = [
 /**
  * What loads when nobody has chosen.
  *
- * Deliberately the small one. It downloads in well under a minute on an
- * ordinary connection, runs on weak graphics hardware, and its answers stay
- * close to the documents — which is most of what this app asks of a model.
- * A first-time user should not be handed a two-gigabyte download, or a
- * failure on a laptop that cannot hold the weights.
+ * This started as the 1B, on the reasoning that a first-time user should not
+ * be handed a two-gigabyte download. Testing against real CVs settled it the
+ * other way: asked when the user worked somewhere, with the dates highlighted
+ * in the evidence beside it, the 1B answered "I cannot provide a direct
+ * answer". Documents of this kind are dense fragments rather than prose, and
+ * the smaller model gives up on them. An app whose whole purpose is answering
+ * from your own files cannot default to a model that declines to read them.
  */
-export const DEFAULT_MODEL_ID = 'Llama-3.2-1B-Instruct-q4f16_1-MLC';
+export const DEFAULT_MODEL_ID = 'Llama-3.2-3B-Instruct-q4f16_1-MLC';
 
 /** How a model appears in the picker: name, what it is for, how big. */
 export const describeModel = (model: ModelOption): string =>

@@ -1,14 +1,15 @@
 import { describe, expect, test } from 'bun:test';
-import { buildMessages, retrievalQuery } from '@/llm/answer';
-import type { SearchResult } from '@/search/types';
+import { buildMessages, chooseQueries, retrievalQueries } from '@/llm/answer';
+import type { ContextSource } from '@/search/context';
 
-const hit = (id: number, filename: string, text: string): SearchResult => ({
-    id,
+/** A source as the pipeline assembles it: a piece expanded with its
+ *  neighbours, or a whole short document. */
+const hit = (id: number, filename: string, text: string): ContextSource => ({
     docId: id,
     score: '1.50',
     text,
     filename,
-    debug: { vector: '0.5', keyword: '0.5' },
+    kind: 'window',
 });
 
 const evidence = [
@@ -44,7 +45,7 @@ describe('buildMessages', () => {
     test('folds the library inventory into the system message', () => {
         const messages = buildMessages('When can I leave?', evidence, inventory);
         expect(messages[0]?.content).toContain('LIBRARY INVENTORY');
-        expect(messages[0]?.content).toContain('answer questions using ONLY the excerpts');
+        expect(messages[0]?.content).toContain('Use only what the excerpts say');
     });
 
     test('carries every evidence passage and its filename', () => {
@@ -53,8 +54,11 @@ describe('buildMessages', () => {
 
         expect(user).toContain('sixty days written notice');
         expect(user).toContain('one calendar month of notice');
-        expect(user).toContain('(lease.pdf)');
-        expect(user).toContain('(contract.pdf)');
+        // Labelled by filename, in the bracket form the answer should cite —
+        // numbering them invited "According to excerpt [1]" instead.
+        expect(user).toContain('[lease.pdf]');
+        expect(user).toContain('[contract.pdf]');
+        expect(user).not.toContain('[1]');
     });
 
     test('puts the question last, where the model will not lose it', () => {
@@ -97,25 +101,79 @@ describe('buildMessages with conversation history', () => {
     });
 });
 
-describe('retrievalQuery', () => {
+describe('retrievalQueries', () => {
     const history = [
         { role: 'user' as const, content: 'What does my 2026 resume say about education?' },
         { role: 'assistant' as const, content: 'It lists UBC Kelowna [resume.pdf].' },
     ];
 
-    test('leaves a self-contained question alone', () => {
-        const question = 'What does my lease say about subletting the flat?';
-        expect(retrievalQuery(question, history)).toBe(question);
+    test('a self-contained question is searched on its own', () => {
+        const question =
+            'What does my employment contract say about the notice period if I resign?';
+        expect(retrievalQueries(question, history)).toEqual([question]);
     });
 
-    test('carries the previous question into a bare follow-up', () => {
-        // "and the 2024 one?" has nothing for an index to match on.
-        const expanded = retrievalQuery('And the 2024 one?', history);
-        expect(expanded).toContain('2026 resume');
-        expect(expanded).toContain('2024');
+    /**
+     * A follow-up can be phrased any number of ways, so this cannot depend on
+     * spotting particular words. Anything short enough to be leaning on the
+     * previous question is searched both ways and the results merged.
+     */
+    test('short follow-ups are searched both ways, however they are phrased', () => {
+        const followUps = [
+            'And the 2024 one?',
+            'What about the other one',
+            'the other one',
+            'which of those is longer',
+            'the freelance version?',
+            'what about 2024',
+            'show me that one',
+            '?',
+        ];
+
+        for (const question of followUps) {
+            const queries = retrievalQueries(question, history);
+            expect(queries).toHaveLength(2);
+            expect(queries[0]).toBe(question);
+            expect(queries[1]).toContain('2026 resume');
+            expect(queries[1]).toContain(question);
+        }
     });
 
-    test('a follow-up with no history is searched as written', () => {
-        expect(retrievalQuery('And the 2024 one?', [])).toBe('And the 2024 one?');
+    test('with no history there is nothing to lean on', () => {
+        expect(retrievalQueries('And the 2024 one?', [])).toEqual(['And the 2024 one?']);
+    });
+
+    test('only the most recent question is used', () => {
+        const longer = [
+            { role: 'user' as const, content: 'What is in my lease?' },
+            { role: 'assistant' as const, content: 'A notice period [lease.pdf].' },
+            ...history,
+        ];
+        expect(retrievalQueries('the other one', longer)[1]).toContain('2026 resume');
+        expect(retrievalQueries('the other one', longer)[1]).not.toContain('lease');
+    });
+});
+
+describe('chooseQueries', () => {
+    test('uses the plan when the question was genuinely split', () => {
+        const planned = ['lease notice period', 'contract resignation terms'];
+        expect(chooseQueries(planned, ['expanded form'])).toEqual(planned);
+    });
+
+    /**
+     * The bug this exists for: a follow-up of "?" was expanded for retrieval
+     * into "What is in my resumes ? ?", whose two question marks made the
+     * planner treat it as two questions and fan it out into four searches.
+     * The planner now only ever sees the question as typed.
+     */
+    test('falls back to the retrieval queries when there was no plan', () => {
+        expect(chooseQueries(['?'], ['?', 'What is in my resumes ?'])).toEqual([
+            '?',
+            'What is in my resumes ?',
+        ]);
+    });
+
+    test('an empty plan still yields something to search', () => {
+        expect(chooseQueries([], ['anything'])).toEqual(['anything']);
     });
 });

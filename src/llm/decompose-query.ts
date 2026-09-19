@@ -16,23 +16,36 @@ import { contentWords } from '@/search/words';
  * and whatever it produces is filtered before it is trusted.
  */
 
-/** Connectives that signal a question is asking about more than one thing. */
-const MULTI_PART_MARKERS = [
+/**
+ * Words that join two things together. These only mean the question has two
+ * parts when there is something on *both* sides: a follow-up opening with
+ * "and" — "and the other one?" — continues the previous question rather than
+ * asking two.
+ */
+const CONNECTIVES = [
     ' and ',
     ' vs ',
     ' vs. ',
     ' versus ',
+    ' as well as ',
+    ' along with ',
+    ' both ',
+];
+
+/**
+ * Phrases that ask for a comparison outright. Unlike a connective, these
+ * routinely lead the sentence — "Compare my two CVs" — so they only need
+ * something after them.
+ */
+const COMPARISONS = [
     ' compare ',
     ' compared to ',
     ' comparison ',
     'difference between',
     'differences between',
-    ' both ',
-    ' as well as ',
-    ' along with ',
+    'relationship between',
     ' relate to ',
     ' related to ',
-    'relationship between',
     ' interact ',
     ' each of ',
 ];
@@ -45,10 +58,34 @@ const MULTI_PART_MARKERS = [
 export const looksMultiPart = (query: string): boolean => {
     const normalized = ` ${query.toLowerCase().replace(/\s+/g, ' ').trim()} `;
 
-    // Two or more question marks means two or more questions.
-    if ((query.match(/\?/g) ?? []).length > 1) return true;
+    // Two or more question marks means two or more questions — but only when
+    // each side is actually a question. "and the other one ?" is one.
+    const parts = query.split('?').map((part) => part.trim()).filter(Boolean);
+    if (parts.length > 1 && parts.every((part) => contentWords(part).size > 0)) return true;
 
-    return MULTI_PART_MARKERS.some((marker) => normalized.includes(marker));
+    const sides = (marker: string): { before: string; after: string } | null => {
+        const at = normalized.indexOf(marker);
+        if (at === -1) return null;
+        return {
+            before: normalized.slice(0, at),
+            after: normalized.slice(at + marker.length),
+        };
+    };
+
+    const connective = CONNECTIVES.some((marker) => {
+        const found = sides(marker);
+        return (
+            found !== null &&
+            contentWords(found.before).size > 0 &&
+            contentWords(found.after).size > 0
+        );
+    });
+    if (connective) return true;
+
+    return COMPARISONS.some((marker) => {
+        const found = sides(marker);
+        return found !== null && contentWords(found.after).size > 0;
+    });
 };
 
 /**
