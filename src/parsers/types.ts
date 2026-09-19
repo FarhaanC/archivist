@@ -1,6 +1,22 @@
+import type { ScanReader } from '@/ocr/reader';
+import type { ScanProgress } from '@/ocr/read-scan';
+
 export interface ParseResult {
     title: string;
     text: string;
+    /** True when the words came from reading a picture of the page rather
+     *  than from text stored in the file. Scanned text can have the odd
+     *  wrong word, and the person deserves to know which files those are. */
+    readAsScan?: boolean;
+    /** 0–100, only when readAsScan. */
+    scanConfidence?: number;
+}
+
+/** What a parser may need beyond the file: a scan reader for pictures of
+ *  pages, and somewhere to report page-by-page progress while it reads. */
+export interface ParseContext {
+    reader?: ScanReader;
+    onScanProgress?: (progress: ScanProgress) => void;
 }
 
 export class UnsupportedFileError extends Error {
@@ -11,14 +27,26 @@ export class UnsupportedFileError extends Error {
 }
 
 /**
- * A PDF with almost no selectable text: a photo of a page saved as a PDF.
- * It opens and displays fine, which is exactly why it needs its own error —
- * nobody can tell by looking that there are no words inside to read.
+ * A PDF with no text of its own — a photo of a page saved as a PDF — that
+ * the scan reader could not read either (no reader available, or the reader
+ * found nothing it was sure about: too blurry, too dark, rotated).
  */
 export class ScannedPdfError extends Error {
-    constructor(public readonly filename: string) {
+    constructor(
+        public readonly filename: string,
+        /** Whether a reader actually tried and failed, as opposed to none being available. */
+        public readonly readerTried: boolean,
+    ) {
         super(`Scanned PDF: ${filename}`);
         this.name = 'ScannedPdfError';
+    }
+}
+
+/** A picture that the scan reader could not read anything from. */
+export class UnreadableImageError extends Error {
+    constructor(public readonly filename: string) {
+        super(`Unreadable image: ${filename}`);
+        this.name = 'UnreadableImageError';
     }
 }
 

@@ -6,3 +6,6 @@ dist/
 .env
 .env.*
 bun.lockb
+
+# Scan reader files copied from node_modules by scripts/prepare-ocr.ts
+public/ocr/

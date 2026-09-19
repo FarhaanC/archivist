@@ -1,4 +1,9 @@
-import { PasswordProtectedError, ScannedPdfError, UnsupportedFileError } from '@/parsers/types';
+import {
+    PasswordProtectedError,
+    ScannedPdfError,
+    UnreadableImageError,
+    UnsupportedFileError,
+} from '@/parsers/types';
 
 /**
  * Why a file could not be added, in words for someone who has never heard of
@@ -22,6 +27,7 @@ export type ProblemKind =
     | 'archive'
     | 'unknown-type'
     | 'empty'
+    | 'offline'
     | 'damaged';
 
 export interface ImportProblem {
@@ -52,13 +58,14 @@ export const explainFileType = (name: string): ImportProblem => {
     const ext = extensionOf(name);
 
     if (IMAGE.has(ext)) {
+        // Only the picture types browsers can't draw reach here (HEIC from an
+        // iPhone, TIFF from an office scanner); JPG and PNG go to the reader.
         return {
             kind: 'image',
             label: 'Couldn’t read',
-            headline:
-                'This is a picture. Even when it’s a photo of a document — an ID card, a licence, a letter — Archivist can’t yet read the words out of a picture.',
+            headline: `This is a picture in a format (“.${ext}”) that the browser can’t open, so Archivist can’t read the words off it.`,
             whatToDo:
-                'Reading photos of documents is the next thing being built, so for now there’s nothing to fix on your side. If you can get this document as a typed PDF, Word, Excel or PowerPoint file, add that instead.',
+                'Save or export it as a JPG or PNG — most phones and photo apps can — and add that. Archivist reads JPG and PNG photos of documents.',
         };
     }
     if (AUDIO.has(ext)) {
@@ -106,14 +113,34 @@ export const explainFileType = (name: string): ImportProblem => {
 
 /** Why a file that *was* the right type still couldn't be read. */
 export const explainError = (name: string, error: unknown): ImportProblem => {
+    if (error instanceof ScannedPdfError && error.readerTried) {
+        return {
+            kind: 'scanned-pdf',
+            label: 'Couldn’t read',
+            headline:
+                'This PDF is a photo of the page, not typed text. Archivist tried to read the words off the picture and couldn’t make out any — the scan may be blurry, too dark, very faint, or turned on its side.',
+            whatToDo:
+                'A clearer copy will usually work: scan it again at a higher setting, or take a straight-on photo in good light, and add that. If you can get this document as a typed PDF, Word, Excel or PowerPoint file, that’s better still.',
+        };
+    }
     if (error instanceof ScannedPdfError) {
         return {
             kind: 'scanned-pdf',
             label: 'Couldn’t read',
             headline:
-                'This PDF is a photo of the page, not typed text. It opens and looks normal, but inside there are no actual words — only a picture of them — so there’s nothing for Archivist to search.',
+                'This PDF is a photo of the page, not typed text. It opens and looks normal, but inside there are no actual words — only a picture of them — and the scan reader isn’t available right now.',
             whatToDo:
-                'Reading scanned pages is the next thing being built, so for now there’s nothing to fix on your side. If you can get this document as a typed PDF, Word, Excel or PowerPoint file, add that instead.',
+                'Try adding it again. If you can get this document as a typed PDF, Word, Excel or PowerPoint file, add that instead.',
+        };
+    }
+    if (error instanceof UnreadableImageError) {
+        return {
+            kind: 'image',
+            label: 'Couldn’t read',
+            headline:
+                'Archivist looked at this picture and couldn’t make out any words. It may be blurry, too dark, taken at a sharp angle, or not a document at all.',
+            whatToDo:
+                'If it is a document, take another photo straight-on in good light, or scan it, and add that.',
         };
     }
     if (error instanceof PasswordProtectedError) {
@@ -129,6 +156,16 @@ export const explainError = (name: string, error: unknown): ImportProblem => {
     if (error instanceof UnsupportedFileError) {
         return explainFileType(name);
     }
+    if (looksLikeNetworkFailure(error)) {
+        return {
+            kind: 'offline',
+            label: 'Couldn’t read',
+            headline:
+                'The file itself is fine. Archivist needs to download one small helper (about 45 MB, once) before it can search anything, and it couldn’t reach the internet to get it.',
+            whatToDo:
+                'Check your connection and add the file again. After that first download, Archivist keeps working without the internet.',
+        };
+    }
     return {
         kind: 'damaged',
         label: 'Couldn’t read',
@@ -138,6 +175,12 @@ export const explainError = (name: string, error: unknown): ImportProblem => {
             'Open it in its usual program. If it opens fine there, save a fresh copy and add that. If it won’t open there either, the file itself is broken.',
     };
 };
+
+/** The browser's wording for "the network request never got an answer". A
+ *  failed download of the search helper surfaces as one of these, and blaming
+ *  the person's document for it is exactly wrong. */
+const looksLikeNetworkFailure = (error: unknown): boolean =>
+    error instanceof Error && /failed to fetch|networkerror|load failed|ERR_INTERNET|ERR_NAME_NOT_RESOLVED/i.test(error.message);
 
 /** A file that parsed fine and turned out to contain no words at all. */
 export const explainEmpty = (): ImportProblem => ({

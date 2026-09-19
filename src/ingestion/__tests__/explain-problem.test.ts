@@ -1,6 +1,11 @@
 import { describe, expect, test } from 'bun:test';
 import { explainEmpty, explainError, explainFileType } from '@/ingestion/explain-problem';
-import { PasswordProtectedError, ScannedPdfError, UnsupportedFileError } from '@/parsers/types';
+import {
+    PasswordProtectedError,
+    ScannedPdfError,
+    UnreadableImageError,
+    UnsupportedFileError,
+} from '@/parsers/types';
 
 /**
  * These are the sentences a person reads when their file didn't go in. Each
@@ -12,11 +17,14 @@ import { PasswordProtectedError, ScannedPdfError, UnsupportedFileError } from '@
 const JARGON = /\bOCR\b|text layer|selectable|exception|parse|parser|extension|unsupported|null|undefined/i;
 
 const allProblems = [
-    explainError('degree.pdf', new ScannedPdfError('degree.pdf')),
+    explainError('degree.pdf', new ScannedPdfError('degree.pdf', true)),
+    explainError('degree.pdf', new ScannedPdfError('degree.pdf', false)),
+    explainError('id.jpg', new UnreadableImageError('id.jpg')),
     explainError('bank.pdf', new PasswordProtectedError('bank.pdf')),
     explainError('weird.pdf', new Error('Invalid PDF structure')),
+    explainError('fine.pdf', new Error('Failed to fetch')),
     explainError('x.docx', new UnsupportedFileError('x.docx')),
-    explainFileType('id.jpg'),
+    explainFileType('photo.heic'),
     explainFileType('call.mp3'),
     explainFileType('clip.mp4'),
     explainFileType('setup.exe'),
@@ -45,12 +53,25 @@ describe('every explanation', () => {
 });
 
 describe('explainError', () => {
-    test('a scanned PDF is described as a photo of the page', () => {
-        const problem = explainError('degree.pdf', new ScannedPdfError('degree.pdf'));
+    test('a scan the reader could not make out says so and suggests a clearer copy', () => {
+        const problem = explainError('degree.pdf', new ScannedPdfError('degree.pdf', true));
         expect(problem.kind).toBe('scanned-pdf');
         expect(problem.label).toBe('Couldn’t read');
-        expect(problem.headline).toContain('photo');
-        expect(problem.whatToDo).toContain('next thing being built');
+        expect(problem.headline).toContain('photo of the page');
+        expect(problem.headline).toContain('tried');
+        expect(problem.whatToDo).toContain('clearer');
+    });
+
+    test('a scan with no reader available says that, not that the scan is bad', () => {
+        const problem = explainError('degree.pdf', new ScannedPdfError('degree.pdf', false));
+        expect(problem.headline).toContain('isn’t available');
+        expect(problem.whatToDo).toContain('again');
+    });
+
+    test('a picture with no readable words is told apart from a bad file type', () => {
+        const problem = explainError('id.jpg', new UnreadableImageError('id.jpg'));
+        expect(problem.kind).toBe('image');
+        expect(problem.headline).toContain('couldn’t make out');
     });
 
     test('never sends the person looking for an emailed original — the scan usually is the original', () => {
@@ -72,6 +93,13 @@ describe('explainError', () => {
         expect(problem.whatToDo).toContain('usual program');
     });
 
+    test('a failed download is not blamed on the file', () => {
+        const problem = explainError('fine.pdf', new Error('Failed to fetch'));
+        expect(problem.kind).toBe('offline');
+        expect(problem.headline).toContain('file itself is fine');
+        expect(problem.whatToDo).toContain('connection');
+    });
+
     test('an unsupported-type error falls through to the type explanation', () => {
         expect(explainError('photo.jpg', new UnsupportedFileError('photo.jpg')).kind).toBe('image');
     });
@@ -79,17 +107,18 @@ describe('explainError', () => {
 
 describe('explainFileType', () => {
     test('tells documents-we-cannot-read-yet apart from things that were never documents', () => {
-        expect(explainFileType('id.jpg').label).toBe('Couldn’t read');
+        expect(explainFileType('photo.heic').label).toBe('Couldn’t read');
         expect(explainFileType('call.mp3').label).toBe('Couldn’t read');
         expect(explainFileType('setup.exe').label).toBe('Not a document');
         expect(explainFileType('docs.zip').label).toBe('Not a document');
         expect(explainFileType('thing.xyz').label).toBe('Not a document');
     });
 
-    test('a picture of an ID is still treated as a document', () => {
-        const problem = explainFileType('Emirates_ID.JPG');
+    test('a picture format the browser cannot open says which format and what to convert to', () => {
+        const problem = explainFileType('IMG_0001.HEIC');
         expect(problem.kind).toBe('image');
-        expect(problem.headline).toContain('picture');
+        expect(problem.headline).toContain('.heic');
+        expect(problem.whatToDo).toContain('JPG');
     });
 
     test('an installer says there is nothing to do', () => {

@@ -13,6 +13,7 @@ export interface IngestArgs {
     workerClient: EmbeddingWorker;
     blob?: Blob;
     onProgress?: (done: number, total: number) => void;
+    readAsScan?: boolean;
 }
 
 /**
@@ -26,6 +27,7 @@ export const ingestDocument = async ({
     workerClient,
     blob,
     onProgress,
+    readAsScan,
 }: IngestArgs): Promise<number> => {
     await ensureDbOpen();
 
@@ -37,6 +39,7 @@ export const ingestDocument = async ({
         byteSize: fileObj.size,
         uploadedAt: Date.now(),
         contentHash: await hashText(text),
+        readAsScan: readAsScan || undefined,
     })) as number;
 
     const chunks = chunkText(text);

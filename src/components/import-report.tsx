@@ -35,7 +35,15 @@ const wasAdded = (outcome: ImportOutcome): boolean =>
 const Explanation = ({ outcome }: { outcome: ImportOutcome }): JSX.Element => {
     switch (outcome.status) {
         case 'imported':
-            return <span className="small muted">Added to your library.</span>;
+            return outcome.readAsScan ? (
+                <span className="small muted">
+                    Added. This one was a scan, so the words were read off the picture of
+                    the page — the odd one may be wrong, and the passages shown with an
+                    answer will tell you.
+                </span>
+            ) : (
+                <span className="small muted">Added to your library.</span>
+            );
 
         case 'duplicate':
             return (

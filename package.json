@@ -6,14 +6,16 @@
   "description": "Private, offline document search \u2014 ask questions about your own files, entirely on-device.",
   "license": "UNLICENSED",
   "scripts": {
-    "dev": "vite",
-    "build": "tsc --noEmit && vite build",
+    "dev": "bun scripts/prepare-ocr.ts && vite",
+    "build": "bun scripts/prepare-ocr.ts && tsc --noEmit && vite build",
     "preview": "vite preview",
     "test": "bun test",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "prepare-ocr": "bun scripts/prepare-ocr.ts"
   },
   "dependencies": {
     "@mlc-ai/web-llm": "^0.2.79",
+    "@tesseract.js-data/eng": "^1.0.0",
     "@xenova/transformers": "^2.17.2",
     "dexie": "^4.0.11",
     "jszip": "^3.10.1",
@@ -22,6 +24,7 @@
     "pdfjs-dist": "^4.10.38",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
+    "tesseract.js": "^7.0.0",
     "xlsx": "^0.18.5"
   },
   "devDependencies": {

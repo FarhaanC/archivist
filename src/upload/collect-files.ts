@@ -15,15 +15,20 @@ const TEXT_EXTENSIONS = [
     "rb", "go", "rs", "php", "sql", "sh", "bat", "ps1",
 ];
 
-/** Recognized when organizing a folder, but not indexed: Archivist has no
- *  OCR or transcription yet, so these are filed, never read. */
+/** Pictures of documents — a photographed ID card, a scanned letter saved as
+ *  a JPG. Read by the scan reader, the same path as a scanned PDF. The list
+ *  is what browsers can draw onto a canvas; HEIC and TIFF are not. */
 const IMAGE_EXTENSIONS = ["png", "jpg", "jpeg", "webp", "bmp", "gif"];
+
+/** Recognized when organizing a folder, but not indexed: Archivist has no
+ *  transcription yet, so recordings are filed, never read. */
 const AUDIO_EXTENSIONS = ["mp3", "wav", "m4a", "webm", "ogg", "flac"];
 
 /** Types the ingestion pipeline can actually read. */
 export const SUPPORTED_EXTENSION_GROUPS = {
     Documents: DOCUMENT_EXTENSIONS,
     "Text & code": TEXT_EXTENSIONS,
+    "Scans & photos": IMAGE_EXTENSIONS,
 } as const;
 
 const ORGANIZABLE_EXTENSIONS = new Set([
@@ -44,6 +49,7 @@ export const isOrganizableFile = (name: string): boolean => {
 const SUPPORTED_EXTENSIONS = new Set([
     ...DOCUMENT_EXTENSIONS,
     ...TEXT_EXTENSIONS,
+    ...IMAGE_EXTENSIONS,
 ]);
 
 /** Lowercased extension including the leading dot, or "" if there is none. */

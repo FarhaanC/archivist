@@ -16,6 +16,9 @@ export interface DocumentRecord {
         topics: string[];
         wordCount: number;
     };
+    /** The words were read off a picture of the page (a scan or a photo),
+     *  so the odd one may be wrong. Shown in the library and the report. */
+    readAsScan?: boolean;
     /** Set when this document is a near-duplicate of another. */
     similarToDocId?: number;
     /** Human-readable summary of how it differs from that document. */

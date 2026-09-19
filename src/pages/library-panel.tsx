@@ -47,7 +47,7 @@ export const LibraryPanel = ({
     const run = async (files: File[], skipped: string[]): Promise<void> => {
         if (files.length === 0 && skipped.length === 0) return;
         setReport([]);
-        const outcomes = await importFiles(files, worker, setProgress);
+        const outcomes = await importFiles(files, worker, { onProgress: setProgress });
         setProgress(null);
         setReport([
             ...outcomes,
@@ -98,7 +98,7 @@ export const LibraryPanel = ({
                     </span>
                 </label>
                 <p className="small" style={{ marginBottom: 0, marginTop: 12 }}>
-                    PDF, Word, Excel, PowerPoint, text, Markdown and code
+                    PDF, Word, Excel, PowerPoint, text, Markdown and code — and scans or photos of documents
                 </p>
             </div>
 
@@ -110,8 +110,17 @@ export const LibraryPanel = ({
                             {progress.index + 1} / {progress.total}
                         </span>
                     </div>
+                    {progress.detail && (
+                        <div className="small muted" style={{ marginBottom: 6 }}>
+                            {progress.detail}
+                        </div>
+                    )}
                     <div className="progress">
-                        <div style={{ width: `${((progress.index + 1) / progress.total) * 100}%` }} />
+                        <div
+                            style={{
+                                width: `${((progress.index + (progress.fraction ?? 0)) / progress.total) * 100}%`,
+                            }}
+                        />
                     </div>
                 </div>
             )}
@@ -135,6 +144,11 @@ export const LibraryPanel = ({
                                                 ? ` · ${doc.profile.topics.slice(0, 5).join(', ')}`
                                                 : ''}
                                         </div>
+                                        {doc.readAsScan && (
+                                            <div className="small muted">
+                                                Read from a scan — the odd word may be wrong.
+                                            </div>
+                                        )}
                                         {doc.diffSummary && (
                                             <div className="small" style={{ color: 'var(--warn)' }}>
                                                 Near-duplicate — {doc.diffSummary}
