@@ -10,7 +10,8 @@ import {
 } from '@/llm/get-engine';
 import { findModel, formatMemory } from '@/llm/models';
 import { parseCitations } from '@/search/citations';
-import { makeSnippet } from '@/search/snippet';
+import { findSupportingSentence } from '@/search/locate';
+import { makeSnippet, makeSnippetAt } from '@/search/snippet';
 import {
     appendMessage,
     createConversation,
@@ -62,13 +63,22 @@ const assistantRow = (
     subQueries: result.subQueries.length > 1 ? result.subQueries : undefined,
     // Built from what the model was given, not from the raw matches, so the
     // pane shows the passage it actually read.
-    evidence: result.sources.map((source) => ({
-        docId: source.docId,
-        filename: source.filename,
-        snippet: makeSnippet(source.text, result.question, 420),
-        score: source.score,
-        kind: source.kind,
-    })),
+    evidence: result.sources.map((source) => {
+        // Aim the preview at the sentence the answer rests on, so the proof
+        // is in frame; fall back to where the question's words are.
+        const support = result.answer
+            ? findSupportingSentence(source.text, result.answer, result.question)
+            : null;
+        return {
+            docId: source.docId,
+            filename: source.filename,
+            snippet: support
+                ? makeSnippetAt(source.text, support.start, 420)
+                : makeSnippet(source.text, result.question, 420),
+            score: source.score,
+            kind: source.kind,
+        };
+    }),
     alternatives: result.alternatives.length ? result.alternatives : undefined,
     coach: result.coach ?? undefined,
     modelId: getCurrentModelId() ?? undefined,

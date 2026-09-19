@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { makeSnippet } from '@/search/snippet';
+import { makeSnippet, makeSnippetAt } from '@/search/snippet';
 
 /** Shaped like a real resume chunk: a long unpunctuated run of skills. */
 const RESUME_CHUNK =
@@ -68,5 +68,22 @@ describe('makeSnippet', () => {
         const snippet = makeSnippet(RESUME_CHUNK, 'what is it about', 100);
         expect(snippet.length).toBeGreaterThan(0);
         expect(snippet.startsWith('Farhaan')).toBe(true);
+    });
+});
+
+describe('makeSnippetAt', () => {
+    const text = 'aaaa '.repeat(100) + 'The key sentence is here. ' + 'bbbb '.repeat(100);
+
+    test('starts a little before the given position and cuts at word boundaries', () => {
+        const at = text.indexOf('The key sentence');
+        const snippet = makeSnippetAt(text, at, 120);
+        expect(snippet).toContain('The key sentence is here.');
+        expect(snippet.startsWith('…')).toBe(true);
+        expect(snippet.endsWith('…')).toBe(true);
+        expect(snippet.length).toBeLessThanOrEqual(122);
+    });
+
+    test('returns short text whole', () => {
+        expect(makeSnippetAt('short text', 5, 120)).toBe('short text');
     });
 });

@@ -112,3 +112,36 @@ export const makeSnippet = (
     const body = clean.slice(start, end).trim();
     return `${start > 0 ? '…' : ''}${body}${end < clean.length ? '…' : ''}`;
 };
+
+/**
+ * An extract of `text` that starts a little before `index`, cut at word
+ * boundaries. Used when the caller already knows where the interesting
+ * sentence is — the one an answer was drawn from — rather than guessing
+ * from the question's words. Whitespace is collapsed the same way as
+ * `makeSnippet`, so `index` is adjusted for the characters removed before it.
+ */
+export const makeSnippetAt = (
+    text: string,
+    index: number,
+    maxLength: number = DEFAULT_SNIPPET_LENGTH,
+): string => {
+    const before = text.slice(0, Math.max(0, index));
+    const collapsedBefore = before.replace(/\s+/g, ' ').replace(/^\s/, '').length;
+    const clean = text.replace(/\s+/g, ' ').trim();
+    if (clean.length <= maxLength) return clean;
+
+    let start = Math.max(0, collapsedBefore - Math.floor(maxLength / 6));
+    if (start > 0) start = forwardToWordStart(clean, start);
+
+    let end = start + maxLength;
+    if (end >= clean.length) {
+        end = clean.length;
+        start = Math.max(0, end - maxLength);
+        if (start > 0) start = forwardToWordStart(clean, start);
+    } else {
+        end = backToWordEnd(clean, end);
+    }
+
+    const body = clean.slice(start, end).trim();
+    return `${start > 0 ? '…' : ''}${body}${end < clean.length ? '…' : ''}`;
+};

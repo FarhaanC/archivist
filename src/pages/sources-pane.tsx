@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useRef } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { DocumentView } from '@/pages/document-view';
 import { highlight } from '@/search/highlight';
 import type { MessageRecord, StoredEvidence } from '@/db/types';
 
@@ -56,12 +57,15 @@ const Passage = ({
     hit,
     question,
     innerRef,
+    onOpen,
 }: {
     hit: StoredEvidence;
     /** The question this passage was retrieved for, so its words can be
      *  marked — the passage alone says what was found, not why. */
     question: string;
     innerRef?: (node: HTMLDivElement | null) => void;
+    /** Open the whole document this passage came from. */
+    onOpen: () => void;
 }): JSX.Element => (
     <div className="passage" ref={innerRef}>
         <div className="spread">
@@ -70,6 +74,9 @@ const Passage = ({
             </span>
             <span className="pill mono">{hit.score}</span>
         </div>
+        <button type="button" className="ghost passage-open" onClick={onOpen}>
+            Open the document at this sentence
+        </button>
         {hit.kind && (
             <div className="passage-kind">
                 {hit.kind === 'whole-document'
@@ -111,6 +118,12 @@ export const SourcesPane = ({
     const nodes = useRef(new Map<string, HTMLDivElement>());
     const documents = useMemo(() => bibliography(allAnswers), [allAnswers]);
     const passages = viewing?.evidence ?? [];
+    const [open, setOpen] = useState<{ docId: number; filename: string } | null>(null);
+
+    // A new answer, or a switch of view, closes the document: the reader is
+    // now looking at different evidence.
+    useEffect(() => setOpen(null), [viewing?.id, scope]);
+
 
     useEffect(() => {
         if (!focus || scope !== 'answer') return;
@@ -124,6 +137,21 @@ export const SourcesPane = ({
         void node.offsetWidth;
         node.classList.add('flashing');
     }, [focus, scope]);
+
+    // Every hook above runs on every render; only the output changes here.
+    if (open && viewing) {
+        return (
+            <aside className="sources">
+                <DocumentView
+                    docId={open.docId}
+                    filename={open.filename}
+                    answer={viewing.content}
+                    question={question}
+                    onClose={() => setOpen(null)}
+                />
+            </aside>
+        );
+    }
 
     return (
         <aside className="sources">
@@ -178,6 +206,7 @@ export const SourcesPane = ({
                                     if (node) nodes.current.set(hit.filename, node);
                                     else nodes.current.delete(hit.filename);
                                 }}
+                                onOpen={() => setOpen({ docId: hit.docId, filename: hit.filename })}
                             />
                         ))
                     )
