@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { db } from '@/db/get-db';
 import { ensureDbOpen } from '@/db/ensure-db-open';
 import { deleteDocument } from '@/ingestion/ingest-document';
@@ -21,6 +21,18 @@ const formatBytes = (bytes?: number): string => {
     return `${value.toFixed(value < 10 && unit > 0 ? 1 : 0)} ${units[unit]}`;
 };
 
+/**
+ * How full the bar is: the files already finished with, plus however far
+ * through the files being read right now. Capped at whole, because a bar that
+ * overshoots and a bar that goes backwards both read as something having gone
+ * wrong.
+ */
+const barWidth = (progress: ImportProgress): number => {
+    if (progress.total === 0) return 0;
+    const reading = progress.inFlight.reduce((sum, file) => sum + file.fraction, 0);
+    return Math.min(1, (progress.done + reading) / progress.total);
+};
+
 export const LibraryPanel = ({
     worker,
     onChange,
@@ -32,6 +44,8 @@ export const LibraryPanel = ({
     const [report, setReport] = useState<ImportOutcome[]>([]);
     const [progress, setProgress] = useState<ImportProgress | null>(null);
     const [dragging, setDragging] = useState(false);
+    // The bar is only ever allowed to move forward.
+    const furthest = useRef(0);
 
     const refresh = async (): Promise<void> => {
         await ensureDbOpen();
@@ -47,6 +61,7 @@ export const LibraryPanel = ({
     const run = async (files: File[], skipped: string[]): Promise<void> => {
         if (files.length === 0 && skipped.length === 0) return;
         setReport([]);
+        furthest.current = 0;
         const outcomes = await importFiles(files, worker, { onProgress: setProgress });
         setProgress(null);
         setReport([
@@ -61,6 +76,8 @@ export const LibraryPanel = ({
         ]);
         await refresh();
     };
+
+    if (progress) furthest.current = Math.max(furthest.current, barWidth(progress));
 
     return (
         <>
@@ -105,21 +122,24 @@ export const LibraryPanel = ({
             {progress && (
                 <div className="card">
                     <div className="spread small" style={{ marginBottom: 6 }}>
-                        <span>Reading {progress.file}</span>
+                        <span>Reading your files</span>
                         <span className="muted">
-                            {progress.index + 1} / {progress.total}
+                            {progress.done} of {progress.total} done
                         </span>
                     </div>
-                    {progress.detail && (
-                        <div className="small muted" style={{ marginBottom: 6 }}>
-                            {progress.detail}
+                    {progress.inFlight.map((file) => (
+                        <div key={file.file} className="small muted" style={{ marginBottom: 2 }}>
+                            {file.file} — {file.detail}
+                        </div>
+                    ))}
+                    {progress.inFlight.length > 0 && (
+                        <div className="small muted" style={{ margin: '6px 0' }}>
+                            Scans take a few seconds a page.
                         </div>
                     )}
                     <div className="progress">
                         <div
-                            style={{
-                                width: `${((progress.index + (progress.fraction ?? 0)) / progress.total) * 100}%`,
-                            }}
+                            style={{ width: `${furthest.current * 100}%` }}
                         />
                     </div>
                 </div>
