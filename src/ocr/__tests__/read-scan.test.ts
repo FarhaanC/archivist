@@ -66,3 +66,26 @@ describe('readImageFile', () => {
         expect(out.text).toBe('');
     });
 });
+
+describe('Arabic', () => {
+    /**
+     * UAE documents put Arabic and English on the same page — an identity
+     * card, a driving licence, a visa. The scan reader now reads both, so
+     * neither half may be thrown away or mangled on the way through.
+     */
+    test('Arabic text is worth keeping', () => {
+        expect(isReadable('\u0631\u062e\u0635\u0629 \u0642\u064a\u0627\u062f\u0629', 82)).toBe(true);
+    });
+
+    test('Arabic and English on one page both survive', () => {
+        const page = '\u0631\u062e\u0635\u0629 \u0642\u064a\u0627\u062f\u0629\nDriving Licence\n\nExpiry 2027-04-11';
+        const cleaned = cleanScanText(page);
+        expect(cleaned).toContain('\u0631\u062e\u0635\u0629');
+        expect(cleaned).toContain('Driving Licence');
+        expect(cleaned).toContain('Expiry 2027-04-11');
+    });
+
+    test('a low-confidence Arabic page is still dropped, like any other', () => {
+        expect(isReadable('\u0631\u062e\u0635\u0629 \u0642\u064a\u0627\u062f\u0629', 12)).toBe(false);
+    });
+});

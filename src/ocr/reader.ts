@@ -33,10 +33,15 @@ const OCR_BASE = `${import.meta.env.BASE_URL}ocr`;
 
 /**
  * Lazily-created Tesseract worker. Creating one costs a few seconds (the
- * engine and language data load, ~7 MB the first time, cached after), so it
+ * engine and language data load, ~9 MB the first time, cached after), so it
  * is created on the first scan and reused for the rest of the import.
+ *
+ * English and Arabic together by default, because the documents this app was
+ * built for — a UAE identity card, a driving licence, a visa page — carry
+ * both on the same page. Tesseract takes several languages joined with "+"
+ * and decides per word. The parameter stays so a caller can narrow it.
  */
-export const createTesseractReader = (language = 'eng'): ScanReader => {
+export const createTesseractReader = (language = 'eng+ara'): ScanReader => {
     let workerPromise: Promise<Worker> | null = null;
     let progressListener: ((fraction: number) => void) | null = null;
 

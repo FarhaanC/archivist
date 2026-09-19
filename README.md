@@ -72,7 +72,7 @@ only after a human says yes.
 | | |
 |---|---|
 | **Reads** | PDF, DOCX, XLSX/XLS/ODS, PPTX, plain text, Markdown, CSV/TSV, JSON, YAML, HTML, and ~18 code extensions |
-| **Reads scans** | Scanned PDFs and JPG/PNG/WebP photos of documents, via Tesseract running in the browser. Pages are drawn at 2× and read one at a time with per-page progress; low-confidence pages are dropped rather than indexed as noise. Documents read this way are marked, in the library and in the report, because the odd word will be wrong |
+| **Reads scans** | Scanned PDFs and JPG/PNG/WebP photos of documents, in English and Arabic, via Tesseract running in the browser. Pages are drawn at 2× and read one at a time with per-page progress; low-confidence pages are dropped rather than indexed as noise. Documents read this way are marked, in the library and in the report, because the odd word will be wrong |
 | **Retrieves** | `all-MiniLM-L6-v2` embeddings (384-dim) + MiniSearch keyword index, fused with RRF; ~500-char chunks, 50-char overlap |
 | **Answers** | Llama 3.2 3B by default, fetched on your first question; five others from SmolLM2 360M to Mistral 7B. WebLLM on WebGPU, inline `[filename]` citations |
 | **Remembers chats** | Saved conversations with their evidence; follow-ups carry earlier turns into both the prompt and the search |
@@ -97,8 +97,8 @@ bun run build    # typecheck + production build
 The embedding model (~45MB) downloads on first use and is cached. The answering
 model (~1GB) is opt-in — search and the library work without it, and the app
 says so rather than hanging on a download you didn't ask for. The scan reader
-(engine + English data, ~7MB) is served by the app itself from `public/ocr`,
-copied out of `node_modules` by `scripts/prepare-ocr.ts` before every dev run
+(engine plus English and Arabic data, ~9MB) is served by the app itself from
+`public/ocr`, copied out of `node_modules` by `scripts/prepare-ocr.ts` before every dev run
 and build, so reading a scan never depends on a third-party CDN and keeps
 working offline.
 

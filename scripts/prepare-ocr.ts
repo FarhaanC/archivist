@@ -1,6 +1,6 @@
 /**
- * Copy the scan reader (Tesseract) and its English language data out of
- * node_modules and into public/ocr, where the app serves them itself.
+ * Copy the scan reader (Tesseract) and its language data out of node_modules
+ * and into public/ocr, where the app serves them itself.
  *
  * Self-hosted on purpose. The default is to fetch these from a public CDN on
  * first use, which would mean a document import silently depends on a third
@@ -24,6 +24,11 @@ const files: [string, string][] = [
     // "best_int": the accurate model, shrunk to whole numbers — 3 MB rather
     // than the 11 MB standard file, and it reads at least as well.
     ['node_modules/@tesseract.js-data/eng/4.0.0_best_int/eng.traineddata.gz', 'eng.traineddata.gz'],
+    // Arabic, for the same reason English is here: a UAE identity card,
+    // driving licence or visa puts both languages on the same page, and
+    // without this the Arabic half comes back as nonsense characters that
+    // then pollute search. 1.6 MB.
+    ['node_modules/@tesseract.js-data/ara/4.0.0_best_int/ara.traineddata.gz', 'ara.traineddata.gz'],
 ];
 
 await mkdir(out, { recursive: true });
