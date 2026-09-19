@@ -50,7 +50,13 @@ describe('explainError', () => {
         expect(problem.kind).toBe('scanned-pdf');
         expect(problem.label).toBe('Couldn’t read');
         expect(problem.headline).toContain('photo');
-        expect(problem.whatToDo).toContain('original');
+        expect(problem.whatToDo).toContain('next thing being built');
+    });
+
+    test('never sends the person looking for an emailed original — the scan usually is the original', () => {
+        for (const problem of allProblems) {
+            expect(problem.whatToDo).not.toMatch(/email|original/i);
+        }
     });
 
     test('a locked PDF explains the password and how to save an unlocked copy', () => {

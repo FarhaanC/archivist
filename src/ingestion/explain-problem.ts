@@ -58,7 +58,7 @@ export const explainFileType = (name: string): ImportProblem => {
             headline:
                 'This is a picture. Even when it’s a photo of a document — an ID card, a licence, a letter — Archivist can’t yet read the words out of a picture.',
             whatToDo:
-                'If you have the same document as a PDF, Word file or email attachment, add that instead. Reading photos of documents is on the list of things to add.',
+                'Reading photos of documents is the next thing being built, so for now there’s nothing to fix on your side. If you can get this document as a typed PDF, Word, Excel or PowerPoint file, add that instead.',
         };
     }
     if (AUDIO.has(ext)) {
@@ -113,7 +113,7 @@ export const explainError = (name: string, error: unknown): ImportProblem => {
             headline:
                 'This PDF is a photo of the page, not typed text. It opens and looks normal, but inside there are no actual words — only a picture of them — so there’s nothing for Archivist to search.',
             whatToDo:
-                'If you were emailed the original (a PDF or Word file that wasn’t scanned), add that instead. Reading scanned pages is on the list of things to add.',
+                'Reading scanned pages is the next thing being built, so for now there’s nothing to fix on your side. If you can get this document as a typed PDF, Word, Excel or PowerPoint file, add that instead.',
         };
     }
     if (error instanceof PasswordProtectedError) {
