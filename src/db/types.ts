@@ -58,6 +58,14 @@ export interface StoredEvidence {
     sections?: number;
 }
 
+/** Why a question was searched for in more than one way. */
+export interface SearchedWith {
+    /** 'multi-part': the question was split. 'follow-up': it was searched
+     *  again with the previous question in front of it. */
+    kind: 'multi-part' | 'follow-up';
+    queries: string[];
+}
+
 /** One turn in a conversation. */
 export interface MessageRecord {
     id?: number;
@@ -69,8 +77,12 @@ export interface MessageRecord {
     createdAt: number;
     /** Assistant turns: why there was no written answer, in plain words. */
     note?: string;
-    /** Assistant turns: what was actually searched for. */
+    /** Assistant turns: what was actually searched for. Kept for answers
+     *  saved before `searchedWith` existed; new answers write both. */
     subQueries?: string[];
+    /** Assistant turns: what was searched for, and why there was more than
+     *  one search. */
+    searchedWith?: SearchedWith;
     evidence?: StoredEvidence[];
     alternatives?: { docId: number; title: string; snippet: string }[];
     coach?: { note: string; suggestions: string[] };

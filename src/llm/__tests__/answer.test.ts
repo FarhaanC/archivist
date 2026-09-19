@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { buildMessages, chooseQueries, retrievalQueries } from '@/llm/answer';
+import { buildMessages, chooseQueries, historyToSend, retrievalQueries } from '@/llm/answer';
 import type { ContextSource } from '@/search/context';
 
 /** A source as the pipeline assembles it: a piece expanded with its
@@ -115,11 +115,13 @@ describe('retrievalQueries', () => {
     });
 
     /**
-     * A follow-up can be phrased any number of ways, so this cannot depend on
-     * spotting particular words. Anything short enough to be leaning on the
-     * previous question is searched both ways and the results merged.
+     * Rewritten deliberately. This block used to assert that ANY short
+     * question was searched both ways, which is exactly the behaviour that
+     * turned out to be wrong: "Which university is my degree from?" is short
+     * and stands perfectly well on its own. What is searched both ways is now
+     * a question that points backwards — see src/llm/follow-up.ts.
      */
-    test('short follow-ups are searched both ways, however they are phrased', () => {
+    test('a follow-up is searched both ways', () => {
         const followUps = [
             'And the 2024 one?',
             'What about the other one',
@@ -137,6 +139,24 @@ describe('retrievalQueries', () => {
             expect(queries[0]).toBe(question);
             expect(queries[1]).toContain('2026 resume');
             expect(queries[1]).toContain(question);
+        }
+    });
+
+    /**
+     * The regression that prompted this change: an ordinary question was
+     * short enough to trip the old length rule, so it was searched twice and
+     * the screen announced "2 sub-questions" for a question nobody had split.
+     */
+    test('an ordinary question is searched once even with history behind it', () => {
+        const ordinary = [
+            'Where did I work as an AI engineer?',
+            'How much did I pay for my insurance renewal?',
+            'Which university is my degree from?',
+            'When does my vehicle licence expire?',
+        ];
+
+        for (const question of ordinary) {
+            expect(retrievalQueries(question, history)).toEqual([question]);
         }
     });
 
@@ -176,5 +196,68 @@ describe('chooseQueries', () => {
 
     test('an empty plan still yields something to search', () => {
         expect(chooseQueries([], ['anything'])).toEqual(['anything']);
+    });
+});
+
+describe('historyToSend', () => {
+    const history = [
+        { role: 'user' as const, content: 'What is the notice period?' },
+        { role: 'assistant' as const, content: 'Thirty days [contract.pdf].' },
+        { role: 'user' as const, content: 'What does my lease say about rent?' },
+        { role: 'assistant' as const, content: 'Six thousand a month [lease.pdf].' },
+    ];
+
+    /**
+     * The bug: asked when a vehicle licence expired, straight after a
+     * question about a notice period, the model opened its answer with "The
+     * excerpt does not mention the notice period in your employment
+     * contract". It had been handed the whole recent conversation and
+     * answered the wrong question first.
+     */
+    test('a question that stands alone gets a fresh start', () => {
+        expect(historyToSend('When does my vehicle licence expire?', history)).toEqual([]);
+    });
+
+    test('a follow-up gets the exchange immediately before it, and no more', () => {
+        const sent = historyToSend('And the other one?', history);
+        expect(sent).toEqual([
+            { role: 'user', content: 'What does my lease say about rent?' },
+            { role: 'assistant', content: 'Six thousand a month [lease.pdf].' },
+        ]);
+    });
+
+    test('an empty conversation sends nothing', () => {
+        expect(historyToSend('And the other one?', [])).toEqual([]);
+    });
+});
+
+describe('what the model is shown', () => {
+    const history = [
+        { role: 'user' as const, content: 'What is the notice period?' },
+        { role: 'assistant' as const, content: 'Thirty days [contract.pdf].' },
+    ];
+
+    test('no earlier turns for a self-contained question', () => {
+        const messages = buildMessages(
+            'When does my vehicle licence expire?',
+            evidence,
+            inventory,
+            historyToSend('When does my vehicle licence expire?', history),
+        );
+
+        expect(messages.map((m) => m.role)).toEqual(['system', 'user']);
+        expect(messages.map((m) => m.content).join('\n')).not.toContain('notice period?');
+    });
+
+    test('exactly the last exchange for a follow-up', () => {
+        const messages = buildMessages(
+            'And the other one?',
+            evidence,
+            inventory,
+            historyToSend('And the other one?', history),
+        );
+
+        expect(messages.map((m) => m.role)).toEqual(['system', 'user', 'assistant', 'user']);
+        expect(messages[1]?.content).toBe('What is the notice period?');
     });
 });

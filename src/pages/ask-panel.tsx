@@ -9,6 +9,7 @@ import {
     supportsWebGpu,
 } from '@/llm/get-engine';
 import { findModel, formatMemory } from '@/llm/models';
+import { searchDetail, searchedWithOf, searchHeading } from '@/chat/searched-with';
 import { parseCitations } from '@/search/citations';
 import { findSupportingSentence } from '@/search/locate';
 import { makeSnippet, makeSnippetAt } from '@/search/snippet';
@@ -61,6 +62,7 @@ const assistantRow = (
     content: result.answer,
     note: result.failure ? failureNote(result.failure) : undefined,
     subQueries: result.subQueries.length > 1 ? result.subQueries : undefined,
+    searchedWith: result.searchedWith ?? undefined,
     // Built from what the model was given, not from the raw matches, so the
     // pane shows the passage it actually read.
     evidence: result.sources.map((source) => {
@@ -534,6 +536,7 @@ const AssistantTurn = ({
     const filenames = (message.evidence ?? []).map((hit) => hit.filename);
     const segments = parseCitations(message.content, filenames);
     const passageCount = message.evidence?.length ?? 0;
+    const searched = searchedWithOf(message);
 
     return (
         <div
@@ -565,13 +568,11 @@ const AssistantTurn = ({
 
             {message.note && <div className="notice warn small">{message.note}</div>}
 
-            {message.subQueries && message.subQueries.length > 1 && (
+            {searched && (
                 <details className="aside-block">
-                    <summary className="small muted">
-                        Searched as {message.subQueries.length} sub-questions
-                    </summary>
+                    <summary className="small muted">{searchHeading(searched)}</summary>
                     <ul className="plain small">
-                        {message.subQueries.map((sub) => (
+                        {searchDetail(searched).map((sub) => (
                             <li key={sub} className="mono">
                                 {sub}
                             </li>

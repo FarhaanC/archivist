@@ -13,7 +13,9 @@ import {
 import { STOP_WORDS } from '@/search/constants';
 import { buildSources, type ContextSource } from '@/search/context';
 import { makeSnippet } from '@/search/snippet';
-import { contentWordList } from '@/search/words';
+import { isFollowUp } from '@/llm/follow-up';
+import { describeSearch } from '@/chat/searched-with';
+import type { SearchedWith } from '@/db/types';
 import type { EmbeddingWorker, SearchResult } from '@/search/types';
 
 /**
@@ -59,6 +61,9 @@ export interface AnswerResult {
     failure: AnswerFailure | null;
     results: SearchResult[];
     subQueries: string[];
+    /** What was searched for and why, when it was more than one search.
+     *  `null` when the question was searched exactly as typed. */
+    searchedWith: SearchedWith | null;
     alternatives: { docId: number; title: string; snippet: string }[];
     coach: CoachAdvice | null;
 }
@@ -75,38 +80,45 @@ export interface PriorTurn {
 }
 
 /**
- * Below this many meaningful words, a question is treated as possibly leaning
- * on the one before it. Follow-ups are short by nature — "which of those is
- * longer" carries two meaningful words, "the freelance version" two — while a
- * question that names its own subject usually carries five or more.
- */
-export const SELF_CONTAINED_WORDS = 5;
-
-/**
  * What to actually search for.
  *
  * A follow-up rarely repeats its subject. "And the other one?", "what about
  * the freelance version", "which of those is longer", "the 2024 one" — none
- * of them name a document, so searching them alone finds nothing useful.
+ * of them name a document, so searching them alone finds nothing useful. For
+ * those, search BOTH — the question as typed, and the previous question with
+ * this one appended. The two result sets are merged and ranked together, so
+ * the expansion can only help.
  *
- * The first attempt at this looked for particular words, which only ever
- * covers the phrasings you thought of. Instead: whenever a question is short
- * enough that it might be leaning on the previous one, search BOTH — the
- * question as typed, and the previous question with this one appended. The
- * two result sets are merged and ranked together, so a question that stands
- * on its own still wins on its own terms, and one that does not gets rescued.
- * No list of follow-up words to keep up to date.
+ * Which questions get that treatment used to be decided by length, on the
+ * theory that follow-ups are short. They are, but so is almost every other
+ * question, so almost everything was searched twice. `isFollowUp` looks for
+ * words that point backwards instead; see src/llm/follow-up.ts.
  */
 export const retrievalQueries = (question: string, history: PriorTurn[] = []): string[] => {
     const previous = [...history].reverse().find((turn) => turn.role === 'user')?.content;
     if (!previous) return [question];
-
-    // A long question carries its own subject; adding the previous one would
-    // only dilute it.
-    if (contentWordList(question).length >= SELF_CONTAINED_WORDS) return [question];
+    if (!isFollowUp(question)) return [question];
 
     return [question, `${previous} ${question}`];
 };
+
+/**
+ * How much of the conversation the model is shown.
+ *
+ * Nothing, for a question that stands on its own. Sending the recent turns
+ * regardless meant old questions leaked into new answers: asked when a
+ * vehicle licence expired, the model opened with "The excerpt does not
+ * mention the notice period in your employment contract" — the notice period
+ * being the question before it — and only then gave the date.
+ *
+ * For a real follow-up, only the exchange immediately before it. That is what
+ * "the other one" can possibly refer to; anything older is noise paid for out
+ * of the same context window as the evidence.
+ */
+export const HISTORY_TURNS_FOR_FOLLOW_UP = 2;
+
+export const historyToSend = (question: string, history: PriorTurn[]): PriorTurn[] =>
+    isFollowUp(question) ? history.slice(-HISTORY_TURNS_FOR_FOLLOW_UP) : [];
 
 const buildContext = (sources: ContextSource[]): string =>
     sources.map((s) => `From [${s.filename}]:\n${s.text}`).join('\n\n');
@@ -172,6 +184,10 @@ export const ask = async (
               )
             : [question];
     const subQueries = chooseQueries(planned, queries);
+    // Two different reasons to run several searches, told apart so the screen
+    // can name the right one: `queries` grew only when the question was read
+    // as a follow-up.
+    const searchedWith = describeSearch(subQueries, queries.length > 1);
 
     const retrieved = await searchMulti(subQueries, worker);
     const results = dedupeSimilarResults(retrieved);
@@ -201,6 +217,7 @@ export const ask = async (
             failure: { kind: 'model-not-loaded' },
             results,
             subQueries,
+            searchedWith,
             alternatives,
             coach: null,
         };
@@ -215,6 +232,7 @@ export const ask = async (
             failure: { kind: 'no-results' },
             results,
             subQueries,
+            searchedWith,
             alternatives,
             coach: await coachTurn(question, '', 0, [], repeatCount, WEAK_EVIDENCE_THRESHOLD),
         };
@@ -230,7 +248,7 @@ export const ask = async (
                 question,
                 sources,
                 formatInventoryChunk(inventory),
-                history,
+                historyToSend(question, history),
             ),
         });
 
@@ -252,6 +270,7 @@ export const ask = async (
             failure: { kind: 'generation-failed', detail },
             results,
             subQueries,
+            searchedWith,
             alternatives,
             coach: null,
         };
@@ -265,6 +284,7 @@ export const ask = async (
             failure: { kind: 'generation-failed', detail: 'The model returned an empty response.' },
             results,
             subQueries,
+            searchedWith,
             alternatives,
             coach: null,
         };
@@ -283,5 +303,15 @@ export const ask = async (
     );
     if (coach) recordFailedQuestion(question);
 
-    return { question, sources, answer, failure: null, results, subQueries, alternatives, coach };
+    return {
+        question,
+        sources,
+        answer,
+        failure: null,
+        results,
+        subQueries,
+        searchedWith,
+        alternatives,
+        coach,
+    };
 };
