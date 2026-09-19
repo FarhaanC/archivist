@@ -4,8 +4,10 @@ import { findExactDuplicate, findNearDuplicate } from '@/ingestion/dedupe';
 import { ingestDocument } from '@/ingestion/ingest-document';
 import { buildDocProfile, saveDocProfile } from '@/knowledge/doc-profile';
 import { describeChanges, summarizeDiff, wordDiff } from '@/knowledge/word-diff';
+import { explainEmpty, explainError } from '@/ingestion/explain-problem';
 import { parseFile } from '@/parsers/parse-file';
 import { UnsupportedFileError } from '@/parsers/types';
+import type { ImportProblem } from '@/ingestion/explain-problem';
 import type { PlainDiff } from '@/knowledge/word-diff';
 import type { EmbeddingWorker } from '@/lib/types';
 
@@ -31,8 +33,10 @@ export type ImportOutcome =
           changes: PlainDiff;
       }
     | { status: 'duplicate'; file: string; of: string }
-    | { status: 'skipped'; file: string; reason: string }
-    | { status: 'failed'; file: string; reason: string };
+    /** Never reached a parser: the file type isn't one Archivist reads. */
+    | { status: 'skipped'; file: string; problem: ImportProblem }
+    /** Right type, but reading it failed — a scan, a locked PDF, a broken file. */
+    | { status: 'failed'; file: string; problem: ImportProblem };
 
 export interface ImportProgress {
     file: string;
@@ -53,11 +57,7 @@ export const importFiles = async (
         try {
             const { text } = await parseFile(file);
             if (!text.trim()) {
-                report.push({
-                    status: 'skipped',
-                    file: file.name,
-                    reason: 'No readable text',
-                });
+                report.push({ status: 'failed', file: file.name, problem: explainEmpty() });
                 continue;
             }
 
@@ -98,10 +98,11 @@ export const importFiles = async (
 
             report.push({ status: 'imported', file: file.name, docId });
         } catch (error) {
+            console.warn(`[Import] Could not read ${file.name}:`, error);
             report.push({
                 status: error instanceof UnsupportedFileError ? 'skipped' : 'failed',
                 file: file.name,
-                reason: error instanceof Error ? error.message : String(error),
+                problem: explainError(file.name, error),
             });
         }
     }

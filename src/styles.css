@@ -71,24 +71,66 @@ input[type="text"], input[type="search"], textarea {
 }
 input:focus, textarea:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
 
-.shell { max-width: 940px; margin: 0 auto; padding: 28px 20px 80px; }
+/* ---- Application shell -------------------------------------------------
+   One bar across the top, one full-height region below it. Everything that
+   scrolls does so inside its own column, so the page itself never scrolls
+   and the composer stays where the user left it. */
+html, body { height: 100%; }
 
-header.masthead {
+.shell { height: 100vh; display: flex; flex-direction: column; }
+
+header.topbar {
     display: flex;
-    align-items: baseline;
-    gap: 12px;
-    flex-wrap: wrap;
-    margin-bottom: 4px;
+    align-items: center;
+    gap: 22px;
+    padding: 0 16px;
+    height: 52px;
+    flex: 0 0 auto;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
 }
-.wordmark { font-size: 21px; font-weight: 620; letter-spacing: -0.015em; margin: 0; }
-.tagline { color: var(--text-dim); font-size: 13.5px; }
+.wordmark { font-size: 15px; font-weight: 620; letter-spacing: -0.015em; margin: 0; }
 
-nav.tabs { display: flex; gap: 4px; margin: 22px 0 20px; border-bottom: 1px solid var(--border); }
+nav.tabs { display: flex; gap: 2px; margin-right: auto; }
 nav.tabs button {
-    border: none; background: none; border-radius: 0; padding: 8px 12px;
-    color: var(--text-dim); border-bottom: 2px solid transparent; margin-bottom: -1px;
+    border: none; background: none; border-radius: 7px; padding: 4px 10px;
+    color: var(--text-dim); font-size: 13.5px;
 }
-nav.tabs button[aria-selected="true"] { color: var(--text); border-bottom-color: var(--accent); font-weight: 560; }
+nav.tabs button[aria-selected="true"] { color: var(--text); background: var(--surface-2); font-weight: 550; }
+
+/* The model, reduced to a line that states what is answering. */
+.model-menu { position: relative; }
+.model-chip {
+    display: inline-flex; align-items: center; gap: 7px;
+    font-size: 12.5px; border-radius: 999px; padding: 4px 11px;
+}
+.model-chip strong { font-weight: 550; }
+.status-dot {
+    width: 6px; height: 6px; border-radius: 50%;
+    background: var(--border); flex: 0 0 auto;
+}
+.status-dot.on { background: var(--good); }
+.model-popover {
+    position: absolute; top: calc(100% + 8px); right: 0; z-index: 20;
+    width: min(420px, calc(100vw - 24px));
+    max-height: min(560px, calc(100vh - 80px));
+    overflow-y: auto;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 16px 18px;
+    box-shadow: 0 12px 34px rgba(0, 0, 0, 0.18);
+}
+
+.view { flex: 1; min-height: 0; }
+.centered { height: 100%; overflow-y: auto; padding: 24px 20px 60px; }
+.centered > * { max-width: 940px; margin-left: auto; margin-right: auto; }
+
+/* A quiet uppercase caption, for section labels that are not headings. */
+.label {
+    font-size: 11px; letter-spacing: 0.07em; text-transform: uppercase;
+    color: var(--text-dim);
+}
 
 .card {
     background: var(--surface);
@@ -136,9 +178,13 @@ nav.tabs button[aria-selected="true"] { color: var(--text); border-bottom-color:
 .suggestions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
 .suggestions button { font-size: 13px; padding: 5px 11px; }
 
-table.report { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+/* Fixed layout so the explanation column wraps instead of pushing the table
+   wider than the card — that was how every sentence got cut off at the right
+   edge. Long file names (installers with hashes in them) break anywhere. */
+table.report { width: 100%; border-collapse: collapse; font-size: 13.5px; table-layout: fixed; }
 table.report td { padding: 6px 8px; border-top: 1px solid var(--border); vertical-align: top; }
-table.report td:first-child { width: 1%; white-space: nowrap; }
+table.report td:first-child { width: 124px; white-space: nowrap; }
+table.report td:last-child { overflow-wrap: anywhere; }
 
 .progress { height: 4px; background: var(--surface-2); border-radius: 999px; overflow: hidden; }
 .progress > div { height: 100%; background: var(--accent); transition: width 200ms ease; }
@@ -184,7 +230,11 @@ select option { background: var(--surface); color: var(--text); }
 /* A control and its actions on one line, wrapping to a stack when narrow. */
 .field-label { font-size: 12.5px; color: var(--text-dim); }
 .field-row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
-.field-row > select { flex: 1 1 240px; width: auto; }
+/* A select refuses to shrink below the width of its longest option unless
+   min-width is cleared — which is how a 480px panel ended up with a dropdown
+   hanging off the side of the window. The closed control clips; the list the
+   browser opens still shows every option in full. */
+.field-row > select { flex: 1 1 220px; width: auto; min-width: 0; }
 .field-row > button { flex: 0 0 auto; }
 
 /* Standing explanation under a group of controls, set apart from them. */
@@ -196,54 +246,6 @@ select option { background: var(--surface); color: var(--text); }
     padding-top: 10px;
     margin: 4px 0 0;
 }
-
-/* Saved conversations: a list beside the transcript. Collapses to a single
-   column on narrow screens, where the chat list moves above the transcript. */
-.chat-layout {
-    display: grid;
-    grid-template-columns: 220px minmax(0, 1fr);
-    gap: 16px;
-    align-items: start;
-}
-@media (max-width: 780px) {
-    .chat-layout { grid-template-columns: minmax(0, 1fr); }
-}
-
-.chat-sidebar { position: sticky; top: 16px; display: flex; flex-direction: column; gap: 10px; }
-.chat-list { display: flex; flex-direction: column; gap: 2px; max-height: 55vh; overflow-y: auto; }
-
-.chat-item {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-    border-radius: var(--radius);
-    padding: 1px;
-}
-.chat-item:hover { background: var(--surface-2); }
-.chat-item.active { background: var(--accent-soft); }
-
-.chat-open {
-    flex: 1;
-    min-width: 0;
-    text-align: left;
-    font-size: 13px;
-    padding: 6px 8px;
-    color: var(--text);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-}
-
-/* Actions stay out of the way until the row is touched, so the list reads as
-   a list of names rather than a wall of buttons. */
-.chat-actions { display: none; gap: 2px; padding-right: 4px; }
-.chat-item:hover .chat-actions,
-.chat-item.active .chat-actions { display: flex; }
-.chat-actions button { padding: 3px 6px; font-size: 11.5px; }
-
-.chat-main { display: flex; flex-direction: column; gap: 12px; }
-.turn-user { background: var(--surface-2); }
-.turn-user .answer { font-weight: 520; }
 
 /* Import report: the file name leads, the explanation follows in the reading
    colour, and differences are a short list rather than a run-on sentence. */
@@ -260,4 +262,163 @@ ul.diff-points li::before {
     position: absolute;
     left: 2px;
     color: var(--text-dim);
+}
+
+/* ---- Ask: chats · conversation · sources -------------------------------
+   Three columns, each scrolling independently. The evidence holds its own
+   column rather than sitting under the answer, because being able to check
+   a claim against your own file at a glance is the point of the app. */
+.ask-grid {
+    height: 100%;
+    display: grid;
+    grid-template-columns: 232px minmax(0, 1fr) 340px;
+    min-height: 0;
+}
+
+.chat-rail {
+    border-right: 1px solid var(--border);
+    min-width: 0;
+    padding: 14px 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-height: 0;
+    overflow: hidden;
+}
+.rail-head { padding: 0 6px 8px; }
+.rail-head button { padding: 3px 8px; font-size: 12.5px; }
+
+.chat-list { display: flex; flex-direction: column; gap: 2px; overflow-y: auto; min-height: 0; }
+.chat-list li { border-top: none; padding: 0; }
+
+.chat-item { display: flex; align-items: center; gap: 4px; border-radius: 7px; }
+.chat-item:hover { background: var(--surface-2); }
+.chat-item.active { background: var(--accent-soft); }
+.chat-open {
+    flex: 1; min-width: 0; text-align: left; font-size: 13px; padding: 7px 9px;
+    color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+/* Actions appear on hover only. Showing them on the active row as well left
+   a narrow column trying to fit a title and two buttons at once, which
+   truncated the name of the chat you were reading to "what u…". */
+.chat-actions { display: none; gap: 2px; padding-right: 3px; flex: 0 0 auto; }
+.chat-item:hover .chat-actions { display: flex; }
+.chat-actions button { padding: 2px 5px; font-size: 11px; }
+
+.convo { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.transcript {
+    flex: 1; overflow-y: auto; min-height: 0;
+    padding: 22px 26px;
+    display: flex; flex-direction: column; gap: 20px;
+}
+
+.turn-question { max-width: 68ch; }
+.turn-question .label { display: block; margin-bottom: 2px; }
+.turn-question > div { font-weight: 560; font-size: 15px; }
+
+.turn-answer {
+    max-width: 68ch;
+    padding-left: 14px;
+    border-left: 2px solid transparent;
+    display: flex; flex-direction: column; gap: 10px;
+    cursor: default;
+}
+/* Marks the answer whose sources the pane is currently showing. */
+.turn-answer.viewing { border-left-color: var(--accent); }
+.turn-foot { margin-top: -2px; }
+
+/* Citations are the one place an answer points at something, so they are the
+   one place you can click. */
+button.citation {
+    border: none; background: none; padding: 0; border-radius: 3px;
+    font: inherit; color: var(--accent); cursor: pointer;
+}
+button.citation:hover { background: var(--accent-soft); }
+
+.aside-block { border-left: 1px solid var(--border); padding-left: 12px; }
+.aside-block summary { cursor: pointer; }
+
+.notice {
+    border: 1px solid var(--border); border-radius: 8px;
+    padding: 11px 13px; background: var(--surface);
+}
+.notice.warn { border-color: var(--warn); color: var(--warn); }
+
+.composer { border-top: 1px solid var(--border); padding: 14px 26px 16px; flex: 0 0 auto; }
+.composer-foot { margin-top: 8px; }
+
+/* ---- Sources pane ---- */
+.sources {
+    border-left: 1px solid var(--border);
+    background: var(--surface);
+    display: flex; flex-direction: column; min-width: 0; min-height: 0;
+}
+.sources-head {
+    display: flex; justify-content: space-between; align-items: baseline;
+    padding: 14px 16px 10px; border-bottom: 1px solid var(--border);
+}
+.sources-scope { padding: 10px 16px; border-bottom: 1px solid var(--border); }
+.seg { display: inline-flex; border: 1px solid var(--border); border-radius: 7px; overflow: hidden; }
+.seg button {
+    border: none; border-radius: 0; background: transparent;
+    color: var(--text-dim); padding: 4px 11px; font-size: 12px;
+}
+.seg button + button { border-left: 1px solid var(--border); }
+.seg button[aria-pressed="true"] { background: var(--accent-soft); color: var(--text); font-weight: 550; }
+
+.sources-list { flex: 1; overflow-y: auto; min-height: 0; }
+.sources-empty { padding: 16px; }
+.passage { padding: 12px 16px; border-bottom: 1px solid var(--border); }
+.passage-name {
+    font-size: 12.5px; font-weight: 550;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.passage-text { font-size: 12.5px; color: var(--text-dim); line-height: 1.5; margin-top: 4px; }
+
+/* Following a citation flashes its passage, so the eye lands in the right
+   place without the pane having to scroll under the reader. */
+.passage.flashing { animation: flash 1100ms ease-out; }
+@keyframes flash {
+    0%, 30% { background: var(--accent-soft); }
+    100% { background: transparent; }
+}
+@media (prefers-reduced-motion: reduce) {
+    .passage.flashing { animation: none; background: var(--accent-soft); }
+}
+
+/* Below three-column width the panes stack and the page scrolls instead. */
+@media (max-width: 1140px) {
+    .shell { height: auto; min-height: 100vh; }
+    .ask-grid { grid-template-columns: minmax(0, 1fr); height: auto; }
+    .chat-rail { border-right: none; border-bottom: 1px solid var(--border); }
+    .chat-list { max-height: 30vh; }
+    .transcript { overflow: visible; }
+    .sources { border-left: none; border-top: 1px solid var(--border); }
+    .sources-list { overflow: visible; }
+}
+
+/* Words from the question, marked inside the passage they were found in.
+   The passage says what was retrieved; the marks say why. */
+.passage-text mark {
+    background: var(--accent-soft);
+    color: var(--text);
+    padding: 0 2px;
+    border-radius: 2px;
+    font-weight: 550;
+}
+
+/* The transcript reads as a column, not as text pinned to the left edge of a
+   wide monitor. Turns keep their measure and sit centred in whatever space
+   the middle column has. */
+.transcript > * { width: 100%; max-width: 74ch; margin-inline: auto; }
+
+/* How a source was assembled — whole document, or a matched section with its
+   neighbours. Stated because what the model read and what you are shown have
+   to be the same thing. */
+.passage-kind {
+    font-size: 11px;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--text-dim);
+    margin-top: 3px;
 }

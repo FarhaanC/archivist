@@ -9,12 +9,22 @@ import type { ImportOutcome } from '@/ingestion/import-files';
  * ordinary sentences rather than as a diff.
  */
 
-const LABEL: Record<ImportOutcome['status'], { label: string; className: string }> = {
-    imported: { label: 'Added', className: 'pill good' },
-    'near-duplicate': { label: 'Added', className: 'pill good' },
-    duplicate: { label: 'Already saved', className: 'pill' },
-    skipped: { label: 'Skipped', className: 'pill' },
-    failed: { label: 'Couldn’t read', className: 'pill warn' },
+/** The pill. For files that didn't go in, the wording comes from the problem
+ *  itself: a scan is a document we "couldn't read", an installer is "not a
+ *  document" — the difference between "this needs fixing" and "ignore this". */
+const labelFor = (outcome: ImportOutcome): { label: string; className: string } => {
+    switch (outcome.status) {
+        case 'imported':
+        case 'near-duplicate':
+            return { label: 'Added', className: 'pill good' };
+        case 'duplicate':
+            return { label: 'Already saved', className: 'pill' };
+        default:
+            return {
+                label: outcome.problem.label,
+                className: outcome.problem.label === 'Not a document' ? 'pill' : 'pill warn',
+            };
+    }
 };
 
 /** Whether the file actually went into the library. Near-duplicates do: they
@@ -66,7 +76,14 @@ const Explanation = ({ outcome }: { outcome: ImportOutcome }): JSX.Element => {
             );
 
         default:
-            return <span className="small muted">{outcome.reason}</span>;
+            return (
+                <div className="small muted">
+                    <div>{outcome.problem.headline}</div>
+                    <div style={{ marginTop: 5 }}>
+                        <strong>What you can do:</strong> {outcome.problem.whatToDo}
+                    </div>
+                </div>
+            );
     }
 };
 
@@ -76,15 +93,21 @@ export const ImportReport = ({ report }: { report: ImportOutcome[] }): JSX.Eleme
 
     const added = report.filter(wasAdded).length;
     const alreadyHad = report.filter((r) => r.status === 'duplicate').length;
-    const notRead = report.length - added - alreadyHad;
+    const notDocuments = report.filter(
+        (r) => (r.status === 'skipped' || r.status === 'failed') && r.problem.label === 'Not a document',
+    ).length;
+    const couldNotRead = report.length - added - alreadyHad - notDocuments;
 
     // Counting only the plain 'imported' rows was wrong, and it was the most
     // confusing number on the page: a batch that was mostly near-duplicates
-    // reported "2 of 9 added" while quietly adding seven of them.
+    // reported "2 of 9 added" while quietly adding seven of them. "14 not read"
+    // was the next confusing number — it lumped four installers in with ten
+    // real documents, so the total looked far worse than it was.
     const summary = [
         `${added} of ${report.length} added`,
         alreadyHad > 0 ? `${alreadyHad} already saved` : '',
-        notRead > 0 ? `${notRead} not read` : '',
+        couldNotRead > 0 ? `${couldNotRead} couldn’t be read` : '',
+        notDocuments > 0 ? `${notDocuments} ${notDocuments === 1 ? 'wasn’t' : 'weren’t'} documents` : '',
     ]
         .filter(Boolean)
         .join(' · ');
@@ -95,14 +118,14 @@ export const ImportReport = ({ report }: { report: ImportOutcome[] }): JSX.Eleme
                 <strong>What happened to your files</strong>
                 <span className="small muted">{summary}</span>
             </div>
-            <div className="scroll">
+            <div>
                 <table className="report">
                     <tbody>
                         {report.map((outcome, index) => (
                             <tr key={`${outcome.file}-${index}`}>
                                 <td>
-                                    <span className={LABEL[outcome.status].className}>
-                                        {LABEL[outcome.status].label}
+                                    <span className={labelFor(outcome).className}>
+                                        {labelFor(outcome).label}
                                     </span>
                                 </td>
                                 <td>

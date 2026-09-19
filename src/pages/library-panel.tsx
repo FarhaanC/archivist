@@ -4,6 +4,7 @@ import { ensureDbOpen } from '@/db/ensure-db-open';
 import { deleteDocument } from '@/ingestion/ingest-document';
 import { importFiles, type ImportOutcome, type ImportProgress } from '@/ingestion/import-files';
 import { ImportReport } from '@/components/import-report';
+import { explainFileType } from '@/ingestion/explain-problem';
 import { ACCEPT_ATTR, collectFilesFromDataTransfer, collectFilesFromInput } from '@/upload/collect-files';
 import type { DocumentRecord } from '@/db/types';
 import type { WorkerClient } from '@/embed/worker-client';
@@ -54,7 +55,7 @@ export const LibraryPanel = ({
                 (file): ImportOutcome => ({
                     status: 'skipped',
                     file,
-                    reason: 'Unsupported file type',
+                    problem: explainFileType(file),
                 }),
             ),
         ]);
