@@ -9,3 +9,6 @@ bun.lockb
 
 # Scan reader files copied from node_modules by scripts/prepare-ocr.ts
 public/ocr/
+
+# Files the Claude desktop app saves here when it sends them to the chat.
+Claude outputs/

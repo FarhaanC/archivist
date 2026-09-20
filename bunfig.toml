@@ -1,2 +1,6 @@
 [test]
 preload = ["./test-setup.ts"]
+# Only the app's own tests. Without this, "bun test" also picks up copies of
+# source files that the desktop app drops in "Claude outputs/", and runs them
+# twice under the wrong paths.
+root = "src"
