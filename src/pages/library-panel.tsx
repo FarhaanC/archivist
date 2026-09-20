@@ -1,12 +1,15 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { db } from '@/db/get-db';
 import { ensureDbOpen } from '@/db/ensure-db-open';
 import { deleteDocument } from '@/ingestion/ingest-document';
 import { importFiles, type ImportOutcome, type ImportProgress } from '@/ingestion/import-files';
+import { listRuns } from '@/ingestion/import-timing';
+import { ImportProgressCard } from '@/components/import-progress';
 import { ImportReport } from '@/components/import-report';
+import { ImportSummary, ImportTimings } from '@/components/import-timings';
 import { explainFileType } from '@/ingestion/explain-problem';
 import { ACCEPT_ATTR, collectFilesFromDataTransfer, collectFilesFromInput } from '@/upload/collect-files';
-import type { DocumentRecord } from '@/db/types';
+import type { DocumentRecord, ImportRunRecord } from '@/db/types';
 import type { WorkerClient } from '@/embed/worker-client';
 
 const formatBytes = (bytes?: number): string => {
@@ -21,18 +24,6 @@ const formatBytes = (bytes?: number): string => {
     return `${value.toFixed(value < 10 && unit > 0 ? 1 : 0)} ${units[unit]}`;
 };
 
-/**
- * How full the bar is: the files already finished with, plus however far
- * through the files being read right now. Capped at whole, because a bar that
- * overshoots and a bar that goes backwards both read as something having gone
- * wrong.
- */
-const barWidth = (progress: ImportProgress): number => {
-    if (progress.total === 0) return 0;
-    const reading = progress.inFlight.reduce((sum, file) => sum + file.fraction, 0);
-    return Math.min(1, (progress.done + reading) / progress.total);
-};
-
 export const LibraryPanel = ({
     worker,
     onChange,
@@ -43,9 +34,8 @@ export const LibraryPanel = ({
     const [documents, setDocuments] = useState<DocumentRecord[]>([]);
     const [report, setReport] = useState<ImportOutcome[]>([]);
     const [progress, setProgress] = useState<ImportProgress | null>(null);
+    const [lastRun, setLastRun] = useState<ImportRunRecord | null>(null);
     const [dragging, setDragging] = useState(false);
-    // The bar is only ever allowed to move forward.
-    const furthest = useRef(0);
 
     const refresh = async (): Promise<void> => {
         await ensureDbOpen();
@@ -61,8 +51,14 @@ export const LibraryPanel = ({
     const run = async (files: File[], skipped: string[]): Promise<void> => {
         if (files.length === 0 && skipped.length === 0) return;
         setReport([]);
-        furthest.current = 0;
-        const outcomes = await importFiles(files, worker, { onProgress: setProgress });
+        // Past runs are what the time estimate leans on before this one has
+        // read enough of its own pages to know how fast this machine is.
+        const history = await listRuns(10);
+        const outcomes = await importFiles(files, worker, {
+            onProgress: setProgress,
+            onRun: setLastRun,
+            history,
+        });
         setProgress(null);
         setReport([
             ...outcomes,
@@ -76,8 +72,6 @@ export const LibraryPanel = ({
         ]);
         await refresh();
     };
-
-    if (progress) furthest.current = Math.max(furthest.current, barWidth(progress));
 
     return (
         <>
@@ -119,33 +113,19 @@ export const LibraryPanel = ({
                 </p>
             </div>
 
-            {progress && (
-                <div className="card">
-                    <div className="spread small" style={{ marginBottom: 6 }}>
-                        <span>Reading your files</span>
-                        <span className="muted">
-                            {progress.done} of {progress.total} done
-                        </span>
-                    </div>
-                    {progress.inFlight.map((file) => (
-                        <div key={file.file} className="small muted" style={{ marginBottom: 2 }}>
-                            {file.file} — {file.detail}
-                        </div>
-                    ))}
-                    {progress.inFlight.length > 0 && (
-                        <div className="small muted" style={{ margin: '6px 0' }}>
-                            Scans take a few seconds a page.
-                        </div>
-                    )}
-                    <div className="progress">
-                        <div
-                            style={{ width: `${furthest.current * 100}%` }}
-                        />
-                    </div>
-                </div>
+            {/* The progress card and the line that replaces it sit in the
+                same place, so nothing on the page jumps when the reading
+                finishes: the card was a promise about how long this would
+                take, and the line is what it came to. */}
+            {progress ? (
+                <ImportProgressCard progress={progress} />
+            ) : (
+                report.length > 0 && <ImportSummary run={lastRun} />
             )}
 
             <ImportReport report={report} />
+
+            {!progress && report.length > 0 && <ImportTimings run={lastRun} />}
 
             {documents.length > 0 && (
                 <div className="card">

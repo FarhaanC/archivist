@@ -450,3 +450,87 @@ button.citation:hover { background: var(--accent-soft); }
 @media (max-width: 900px) {
     .document-body { overflow: visible; }
 }
+
+/* ---- While your files are being read -----------------------------------
+   Three looks, not one. Loading the scan reader has nothing to count, so its
+   bar carries no number and slides; reading counts and fills; the tail end
+   sits full and says so. A bar that has not changed for two seconds gets a
+   slow pulse, because a frozen bar reads as a crash. All of the motion is a
+   courtesy and all of it stops under prefers-reduced-motion. The reasoning,
+   with sources, is in docs/progress-design-notes.md. */
+
+.progress.big { height: 8px; }
+.progress.big > div { transition: width 300ms ease-out; }
+.progress.thin { height: 3px; margin: 3px 0 8px; }
+
+.progress-row { display: flex; align-items: center; gap: 10px; }
+.progress-row > .progress { flex: 1; min-width: 0; }
+.progress-percent { font-variant-numeric: tabular-nums; min-width: 38px; text-align: right; }
+
+/* Nothing to count: a band that travels, with no width claiming to mean
+   anything. */
+.progress.unknown > div {
+    width: 38%;
+    transition: none;
+    animation: progress-sliding 1500ms ease-in-out infinite;
+}
+@keyframes progress-sliding {
+    from { margin-left: -38%; }
+    to { margin-left: 100%; }
+}
+
+/* Still working, just nothing new to report. */
+.progress.alive > div { animation: progress-alive 1800ms ease-in-out infinite; }
+@keyframes progress-alive {
+    50% { opacity: 0.5; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .progress > div { transition: none; }
+    .progress.unknown > div { animation: none; width: 100%; opacity: 0.45; }
+    .progress.alive > div { animation: none; }
+}
+
+.import-progress .import-note { margin: 8px 0 0; }
+.import-progress .import-status:empty { margin: 0; }
+
+/* One file's name must not push the card wider than the pane; the whole name
+   is on the element's title for anyone who needs it. */
+.import-headline,
+.import-file-name {
+    display: inline-block;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    vertical-align: bottom;
+}
+.import-file { margin-top: 8px; }
+.import-file-line { display: flex; gap: 0; min-width: 0; }
+.import-file-line .import-file-name { flex: 0 1 auto; }
+.import-file-detail { white-space: nowrap; flex: none; }
+
+.import-summary { padding: 12px 18px; }
+
+/* ---- How long that took ------------------------------------------------- */
+
+table.timings { width: 100%; border-collapse: collapse; font-size: 13px; }
+table.timings th {
+    text-align: left; font-weight: 600; color: var(--text-dim);
+    font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase;
+    padding: 4px 8px 6px; white-space: nowrap;
+}
+table.timings td { padding: 6px 8px; border-top: 1px solid var(--border); vertical-align: top; }
+table.timings td:not(.timings-file) { white-space: nowrap; font-variant-numeric: tabular-nums; }
+.timings-file { max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+button.timings-past {
+    display: flex; flex-direction: column; align-items: flex-start; gap: 1px;
+    width: 100%; text-align: left; padding: 6px 8px;
+}
+button.timings-past[aria-pressed="true"] { background: var(--surface-2); }
+
+@media (max-width: 520px) {
+    .timings-file { max-width: 130px; }
+    table.timings th, table.timings td { padding: 5px 5px; }
+}
