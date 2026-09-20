@@ -20,5 +20,6 @@ export const parseImage = async (file: File, context: ParseContext = {}): Promis
         text: scan.text,
         readAsScan: true,
         scanConfidence: scan.confidence,
+        pageCount: 1,
     };
 };

@@ -67,6 +67,7 @@ export const parsePdf = async (file: File, context: ParseContext = {}): Promise<
             text: scan.text,
             readAsScan: true,
             scanConfidence: scan.confidence,
+            pageCount: scan.pageCount,
         };
     } finally {
         await pdf.destroy();

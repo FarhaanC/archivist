@@ -60,6 +60,30 @@ export interface PooledWorker {
     terminate(): Promise<void>;
 }
 
+/**
+ * What the pool tells whoever is watching about starting up.
+ *
+ * The first copy of the engine takes several seconds to load — the engine
+ * itself plus both languages, about ten megabytes, once per browser. Nothing
+ * can be counted during that wait, so the progress card needs to know it is
+ * happening in order to say so in words instead of showing a bar that does
+ * not move.
+ */
+export interface ReaderEvents {
+    /** A copy of the engine has begun loading. */
+    onStarting?: () => void;
+    /** It is ready, and took this many milliseconds. */
+    onReady?: (ms: number) => void;
+    /** It could not be loaded. */
+    onFailed?: () => void;
+}
+
+/** A clock that cannot jump backwards, with a fallback for very old browsers. */
+const now = (): number =>
+    typeof performance !== 'undefined' && typeof performance.now === 'function'
+        ? performance.now()
+        : Date.now();
+
 export interface PoolOptions {
     /**
      * Start one copy of the engine. Whatever it reports while reading should
@@ -68,6 +92,7 @@ export interface PoolOptions {
      */
     start: (onProgress: (fraction: number) => void) => Promise<PooledWorker>;
     maxWorkers?: number;
+    events?: ReaderEvents;
 }
 
 interface QueuedPage {
@@ -104,7 +129,11 @@ class ReaderClosedError extends Error {
  * the queueing, the progress routing and the failure handling can be tested
  * without loading a real engine.
  */
-export const createReaderPool = ({ start, maxWorkers = workerCountFor() }: PoolOptions): ScanReader => {
+export const createReaderPool = ({
+    start,
+    maxWorkers = workerCountFor(),
+    events,
+}: PoolOptions): ScanReader => {
     const cap = Math.max(1, Math.floor(maxWorkers));
     const queue: QueuedPage[] = [];
     const lanes: Lane[] = [];
@@ -155,7 +184,20 @@ export const createReaderPool = ({ start, maxWorkers = workerCountFor() }: PoolO
         lane.busy = true;
         try {
             if (!lane.worker) {
-                lane.starting ??= start((fraction) => lane.listener?.(fraction));
+                if (!lane.starting) {
+                    const began = now();
+                    events?.onStarting?.();
+                    lane.starting = start((fraction) => lane.listener?.(fraction)).then(
+                        (worker) => {
+                            events?.onReady?.(now() - began);
+                            return worker;
+                        },
+                        (error: unknown) => {
+                            events?.onFailed?.();
+                            throw error;
+                        },
+                    );
+                }
                 lane.worker = await lane.starting;
                 startFailures = 0;
             }
@@ -217,9 +259,14 @@ export const createReaderPool = ({ start, maxWorkers = workerCountFor() }: PoolO
  * both on the same page. Tesseract takes several languages joined with "+"
  * and decides per word. The parameter stays so a caller can narrow it.
  */
-export const createTesseractReader = (language = 'eng+ara', maxWorkers?: number): ScanReader =>
+export const createTesseractReader = (
+    language = 'eng+ara',
+    maxWorkers?: number,
+    events?: ReaderEvents,
+): ScanReader =>
     createReaderPool({
         maxWorkers: maxWorkers ?? workerCountFor(),
+        events,
         start: async (onProgress) => {
             // Where the engine and language files are served from — the app's
             // own origin, copied there by scripts/prepare-ocr.ts. Read here

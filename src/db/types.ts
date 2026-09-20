@@ -89,3 +89,53 @@ export interface MessageRecord {
     /** Which model wrote this answer. Recorded per turn, because it can change. */
     modelId?: string;
 }
+
+/** What a file turned out to be, for the timing table. */
+export type TimedFileKind = 'typed' | 'scan-pdf' | 'photo' | 'skipped' | 'failed';
+
+/** How long one file took, and what it was. */
+export interface TimedFile {
+    file: string;
+    bytes: number;
+    kind: TimedFileKind;
+    /** Pages the scan reader had to read. Absent for files with text inside. */
+    pages?: number;
+    /** Getting the words out of the file. */
+    readMs: number;
+    /** Cutting it up, working out what it means, and checking it is not
+     *  already in the library. */
+    saveMs: number;
+    /** The row the import report gave it. */
+    outcome: string;
+}
+
+/**
+ * One import, timed. Kept so a person can see whether the app is getting
+ * faster or slower on their own machine, and so a change can be judged by a
+ * number rather than a feeling. Never leaves the browser.
+ */
+export interface ImportRunRecord {
+    id?: number;
+    /** Wall-clock start, for showing a date. Elapsed time is measured with a
+     *  clock that cannot jump, so a laptop going to sleep does not corrupt it. */
+    startedAt: number;
+    totalMs: number;
+    fileCount: number;
+    bytes: number;
+    /** Pages the scan reader read across the whole run. */
+    pages: number;
+    scanCount: number;
+    /** Copies of the scan reader's engine this machine was allowed to run. */
+    engineCopies: number;
+    cores: number;
+    /** The scan reader had to be loaded from cold, which costs several
+     *  seconds that a later run will not pay. */
+    firstRun: boolean;
+    /** Whether the scan reader was needed at all. */
+    usedScanReader: boolean;
+    appVersion: string;
+    userAgent: string;
+    /** Set by the standard timing test, whose file set never changes. */
+    standard?: boolean;
+    files: TimedFile[];
+}

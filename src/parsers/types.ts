@@ -10,6 +10,10 @@ export interface ParseResult {
     readAsScan?: boolean;
     /** 0–100, only when readAsScan. */
     scanConfidence?: number;
+    /** How many pages the scan reader had to read. Only set when the words
+     *  were read off pictures, because that is the only case where the page
+     *  count is what the waiting was made of. */
+    pageCount?: number;
 }
 
 /** What a parser may need beyond the file: a scan reader for pictures of
