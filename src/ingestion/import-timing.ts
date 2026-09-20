@@ -51,6 +51,11 @@ interface FileInProgress {
     file: string;
     bytes: number;
     kind: TimedFileKind;
+    /** Whether reading the file told us what it was. Once it has, a later
+     *  failure does not get to rewrite that: a scan that could not be saved
+     *  was still a scan, and the outcome column is where the failure
+     *  belongs. */
+    known: boolean;
     pages?: number;
     readStarted: number;
     readMs: number;
@@ -114,6 +119,7 @@ export const startRun = ({
                 file: file.name,
                 bytes: file.size ?? 0,
                 kind: 'typed',
+                known: false,
                 readStarted: now(),
                 readMs: 0,
                 saveStarted: 0,
@@ -123,7 +129,9 @@ export const startRun = ({
         describeFile(index, kind, pages) {
             const entry = get(index);
             if (!entry) return;
-            entry.kind = kind;
+            const isFailure = kind === 'failed' || kind === 'skipped';
+            if (!isFailure) entry.known = true;
+            if (!isFailure || !entry.known) entry.kind = kind;
             if (pages !== undefined) entry.pages = pages;
         },
         endRead(index) {

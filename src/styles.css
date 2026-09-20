@@ -508,7 +508,7 @@ button.citation:hover { background: var(--accent-soft); }
 .import-file { margin-top: 8px; }
 .import-file-line { display: flex; gap: 0; min-width: 0; }
 .import-file-line .import-file-name { flex: 0 1 auto; }
-.import-file-detail { white-space: nowrap; flex: none; }
+.import-file-detail { white-space: nowrap; flex: none; padding-left: 0.32em; }
 
 .import-summary { padding: 12px 18px; }
 

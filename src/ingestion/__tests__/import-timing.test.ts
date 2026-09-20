@@ -326,6 +326,27 @@ describe('the recorder itself', () => {
         expect(run.totalMs).toBeGreaterThanOrEqual(0);
     });
 
+    test('a file that failed to save was still whatever it was', () => {
+        const timing = startRun({ fileCount: 2, cores: 8, engineCopies: 1 });
+        timing.startFile(0, { name: 'scan.pdf' });
+        timing.describeFile(0, 'scan-pdf', 4);
+        timing.endRead(0);
+        // The words were read fine; saving them is what went wrong.
+        timing.describeFile(0, 'failed');
+        timing.endFile(0, 'failed');
+
+        // This one never got as far as being read at all.
+        timing.startFile(1, { name: 'setup.exe' });
+        timing.endRead(1);
+        timing.describeFile(1, 'skipped');
+        timing.endFile(1, 'skipped');
+
+        const run = timing.endRun();
+        expect(run.files.map((file) => file.kind)).toEqual(['scan-pdf', 'skipped']);
+        expect(run.scanCount).toBe(1);
+        expect(run.pages).toBe(4);
+    });
+
     test('a first, slow start of the scan reader marks the run as a cold one', () => {
         const cold = startRun({ fileCount: 1, cores: 8, engineCopies: 1 });
         cold.readerStarted(6000);
