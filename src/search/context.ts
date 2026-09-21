@@ -61,10 +61,25 @@ export const MAX_SOURCES = 3;
  * about a page. Wider than that and unrelated sections start coming along.
  * The strength bar is lowered to 0.7 as well, for a second clause that is
  * far away but plainly about the same thing.
+ *
+ * Nearness then met its own problem on the live site. Five pieces of the
+ * contract matched, all within two of each other — the two rules, and
+ * three pieces around them that say "until further notice" — and one slot
+ * for a second section had to be given to one of them. Score gave it to a
+ * piece that was not the thirty-day rule, and nearness could not tell them
+ * apart: both were two pieces from the best. So nearby matches no longer
+ * compete for a slot. They are all sent, as one stretch of the document,
+ * up to MAX_PIECES_PER_DOCUMENT pieces in all. A cluster of matches on one
+ * page is the document saying "the answer is around here"; the right
+ * response is to send that page. The slot rule still applies to a second
+ * match that is far away, where the two really are separate sections.
  */
 export const MAX_SECTIONS_PER_DOCUMENT = 2;
 export const SECOND_SECTION_RATIO = 0.7;
 export const NEARBY_PIECES = 4;
+/** About 4,000 characters — a page and a half — the most one document may
+ *  send even when everything on it matched. */
+export const MAX_PIECES_PER_DOCUMENT = 8;
 
 export interface ContextSource {
     docId: number;
@@ -113,12 +128,14 @@ const numeric = (score: string): number => {
 export type OrdinalLookup = ReadonlyMap<number, number>;
 
 /**
- * Further matches from the same documents as `chosen`, best first, at most
- * MAX_SECTIONS_PER_DOCUMENT - 1 per document. A second match is kept when it
- * scores close to that document's best, or when it sits within NEARBY_PIECES
- * of it (given `ordinals`; without them, nearness cannot be judged and only
- * strength counts). A weak, distant second match would drag in a section the
- * question is not about, and cost context that a third document needs.
+ * Further matches from the same documents as `chosen`, best first. Given
+ * `ordinals`, a match within NEARBY_PIECES of that document's best is kept
+ * whenever its pieces still fit in the document's budget, and a match that
+ * is far away is kept only when it scores close to the best and the
+ * document has not already sent MAX_SECTIONS_PER_DOCUMENT sections. A
+ * match whose text is already on its way as a neighbour of a kept section
+ * adds nothing and is skipped. Without `ordinals`, nearness cannot be
+ * judged and only strength counts, with the section cap.
  */
 export const extraSections = <T extends { docId: number; id: number; score: string }>(
     results: T[],
@@ -128,22 +145,42 @@ export const extraSections = <T extends { docId: number; id: number; score: stri
     const best = new Map<number, T>();
     for (const c of chosen) best.set(c.docId, c);
 
-    const isNear = (a: T, b: T): boolean => {
-        const first = ordinals?.get(a.id);
-        const second = ordinals?.get(b.id);
-        if (first === undefined || second === undefined) return false;
-        return Math.abs(first - second) <= NEARBY_PIECES;
-    };
+    /** Per document: how many separate sections it sends, and which pieces
+     *  are already on their way (a section and its neighbours). */
+    const sent = new Map<number, { sections: number; pieces: Set<number> }>();
+    for (const c of chosen) {
+        const ordinal = ordinals?.get(c.id);
+        sent.set(c.docId, {
+            sections: 1,
+            pieces: new Set(ordinal === undefined ? [] : neighbourOrdinals(ordinal)),
+        });
+    }
 
-    const taken = new Map<number, number>();
     const extras: T[] = [];
     for (const result of results) {
         const top = best.get(result.docId);
-        if (!top || result.id === top.id) continue;
-        if ((taken.get(result.docId) ?? 0) >= MAX_SECTIONS_PER_DOCUMENT - 1) continue;
+        const have = sent.get(result.docId);
+        if (!top || !have || result.id === top.id) continue;
         const strong = numeric(result.score) >= numeric(top.score) * SECOND_SECTION_RATIO;
-        if (!strong && !isNear(result, top)) continue;
-        taken.set(result.docId, (taken.get(result.docId) ?? 0) + 1);
+
+        const ordinal = ordinals?.get(result.id);
+        const anchor = ordinals?.get(top.id);
+        if (ordinal === undefined || anchor === undefined) {
+            if (!strong || have.sections >= MAX_SECTIONS_PER_DOCUMENT) continue;
+            have.sections += 1;
+            extras.push(result);
+            continue;
+        }
+
+        if (have.pieces.has(ordinal)) continue;
+        const added = neighbourOrdinals(ordinal).filter((o) => !have.pieces.has(o));
+        if (have.pieces.size + added.length > MAX_PIECES_PER_DOCUMENT) continue;
+
+        if (Math.abs(ordinal - anchor) > NEARBY_PIECES) {
+            if (!strong || have.sections >= MAX_SECTIONS_PER_DOCUMENT) continue;
+            have.sections += 1;
+        }
+        for (const o of added) have.pieces.add(o);
         extras.push(result);
     }
     return extras;

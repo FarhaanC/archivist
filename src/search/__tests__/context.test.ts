@@ -6,6 +6,7 @@ import {
     extraSections,
     groupRuns,
     joinChunks,
+    MAX_PIECES_PER_DOCUMENT,
     MAX_SECTIONS_PER_DOCUMENT,
     NEARBY_PIECES,
     NEIGHBOUR_RADIUS,
@@ -86,6 +87,34 @@ describe('extraSections', () => {
         expect(extraSections(results, chooseSources(results, 3), ordinals).map((r) => r.id)).toEqual([2]);
     });
 
+    /**
+     * What actually happened on the live site: five pieces of the contract
+     * matched within two of each other, and with one extra slot to give,
+     * score handed it to a piece that was not the thirty-day rule. Nearby
+     * matches no longer compete: the whole cluster goes.
+     */
+    test('a cluster of nearby matches is sent together, skipping pieces already covered', () => {
+        const results = [
+            hit(71, 12, 'contract.pdf', 'seven days', '1.61'),
+            hit(70, 12, 'contract.pdf', 'until further notice', '1.30'),
+            hit(69, 12, 'contract.pdf', 'contract begins', '1.20'),
+            hit(72, 12, 'contract.pdf', 'no emails to customers', '1.10'),
+            hit(73, 12, 'contract.pdf', 'thirty days', '1.05'),
+        ];
+        const ordinals = new Map([[71, 17], [70, 16], [69, 15], [72, 18], [73, 19]]);
+        // 70 and 72 are neighbours of 71 and already on their way.
+        expect(extraSections(results, chooseSources(results, 3), ordinals).map((r) => r.id)).toEqual([69, 73]);
+    });
+
+    test('a cluster stops growing at the document budget', () => {
+        const results = [...Array(12).keys()].map((n) => hit(n, 12, 'long.pdf', `piece ${n}`, `${(1.9 - n / 20).toFixed(2)}`));
+        const ordinals = new Map(results.map((r, n) => [r.id, 20 + n * 2]));
+        const extras = extraSections(results, chooseSources(results, 3), ordinals);
+        const pieces = new Set([20, ...extras.flatMap((r) => neighbourOrdinals(ordinals.get(r.id) as number))]);
+        expect(pieces.size).toBeLessThanOrEqual(MAX_PIECES_PER_DOCUMENT);
+        expect(extras.length).toBeGreaterThan(1);
+    });
+
     test('a strong second match is kept however far away it is', () => {
         const results = [
             hit(1, 10, 'contract.pdf', 'first rule', '1.63'),
@@ -106,10 +135,11 @@ describe('extraSections', () => {
         expect(extraSections(results, chooseSources(results, 3), far).map((r) => r.id)).toEqual([2]);
     });
 
-    test('never takes more than the cap per document, even when all are near', () => {
+    test('never takes more than the section cap for matches that are far apart', () => {
         const results = [1, 2, 3, 4].map((n) => hit(n, 10, 'contract.pdf', `part ${n}`, '1.60'));
-        const ordinals = new Map([[1, 1], [2, 2], [3, 3], [4, 4]]);
-        expect(extraSections(results, chooseSources(results, 3), ordinals)).toHaveLength(1);
+        const ordinals = new Map([[1, 0], [2, 20], [3, 40], [4, 60]]);
+        expect(extraSections(results, chooseSources(results, 3), ordinals)).toHaveLength(MAX_SECTIONS_PER_DOCUMENT - 1);
+        expect(extraSections(results, chooseSources(results, 3))).toHaveLength(MAX_SECTIONS_PER_DOCUMENT - 1);
     });
 });
 
@@ -322,11 +352,10 @@ describe('buildSources', () => {
     });
 
     /**
-     * Two sections each with a neighbour either side is the most a document
-     * can send. The bound is stated in pieces so it stays true if the
-     * numbers change together.
+     * Two far-apart sections each with a neighbour either side. The bound
+     * is stated in pieces so it stays true if the numbers change together.
      */
-    test('a source is never longer than two full windows and a gap', async () => {
+    test('two far sections are never longer than two full windows and a gap', async () => {
         const pieceSize = 500;
         const docId = (await db.documents.add({
             title: 'long.pdf',
@@ -353,6 +382,26 @@ describe('buildSources', () => {
         const bound = windows * (pieceSize + 1) + SECTION_GAP.length * (MAX_SECTIONS_PER_DOCUMENT - 1);
         expect(sources[0]?.sections).toBe(2);
         expect(sources[0]?.text.length).toBeLessThanOrEqual(bound);
+    });
+
+    test('a cluster of matches never sends more than the document budget', async () => {
+        const pieceSize = 500;
+        const docId = (await db.documents.add({
+            title: 'long.pdf',
+            fullText: 'x'.repeat(WHOLE_DOCUMENT_LIMIT + 3000),
+            uploadedAt: Date.now(),
+        })) as number;
+        await db.chunks.bulkAdd(
+            [...Array(40).keys()].map((n) => ({ docId, ordinal: n, text: `${n}`.padEnd(pieceSize, `p${n}`), vector: [] })),
+        );
+        const rows = await db.chunks.where('docId').equals(docId).toArray();
+        const byOrdinal = new Map(rows.map((r) => [r.ordinal, r.id as number]));
+        const hits = [10, 12, 14, 16, 18, 20, 22].map((o, i) =>
+            hit(byOrdinal.get(o) as number, docId, 'long.pdf', 'x', `${(1.8 - i / 10).toFixed(2)}`),
+        );
+
+        const sources = await buildSources(hits);
+        expect(sources[0]?.text.length).toBeLessThanOrEqual(MAX_PIECES_PER_DOCUMENT * (pieceSize + 1));
     });
 
     test('nearness changes nothing for a short document, which is still sent whole', async () => {
