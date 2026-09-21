@@ -7,6 +7,7 @@
  * person's library. The exact set is written down in
  * docs/progress-design-notes.md; changing it changes what the number means.
  */
+import { flattenArabic } from '@/ocr/labels';
 
 /** Words to draw onto the made-up pages. Ordinary office prose, because that
  *  is what the reader will meet in real life — not a pangram. */
@@ -163,15 +164,186 @@ const jpegPage = async (
     height: canvas.height,
 });
 
+// --- Four cards that are hard on purpose ------------------------------------
+
+/**
+ * The card the four hard files are drawn from: a UAE vehicle licence, near
+ * enough.
+ *
+ * Small grey labels on a tinted background, printed twice — once in English
+ * and once in Arabic — which is what makes these cards hard and what makes
+ * them worth having in a fixed test set. Everything the reader ought to come
+ * back with is written down beside it, so "did this get better?" has a number
+ * rather than an impression.
+ */
+const CARD_ROWS: { label: string; arabic: string; value: string }[] = [
+    { label: 'Licence No.', arabic: 'رقم الرخصة', value: '1868432' },
+    { label: 'Exp. Date', arabic: 'إنتهاء الترخيص', value: '23-12-2025' },
+    { label: 'Ins. Exp.', arabic: 'إنتهاء التأمين', value: '23-01-2026' },
+    { label: 'Plate No.', arabic: 'رقم اللوحة', value: '51234' },
+    { label: 'Nationality', arabic: 'الجنسية', value: 'Indian' },
+    { label: 'Date of Birth', arabic: 'تاريخ الميلاد', value: '14-03-1999' },
+];
+
+/**
+ * What each hard card ought to yield, so the timing page can count how much
+ * of it actually came through.
+ *
+ * The values matter more than the labels: a date with no label is a date
+ * nobody can use, but a label with no date is worse than useless. Both are
+ * counted, and the count is reported as "found of expected".
+ */
+export const STANDARD_EXPECTED: Readonly<Record<string, readonly string[]>> = {
+    'card-small.jpg': CARD_ROWS.flatMap((row) => [row.label, row.value]),
+    'card-tilted.jpg': CARD_ROWS.flatMap((row) => [row.label, row.value]),
+    'card-blurred.jpg': CARD_ROWS.flatMap((row) => [row.label, row.value]),
+    'card-photo.jpg': CARD_ROWS.flatMap((row) => [row.label, row.value, row.arabic]),
+};
+
+/** The hard cards, by the name they are given as files. */
+export const STANDARD_HARD_CARDS = Object.keys(STANDARD_EXPECTED);
+
+/** Loose enough to forgive what does not matter — capitals, spacing, and the
+ *  several ways the same Arabic word can be spelled — and strict enough that
+ *  a wrong date is a miss. */
+const sameShape = (text: string): string => flattenArabic(text).toLowerCase();
+
+/**
+ * How much of a hard card actually came through.
+ *
+ * Null for every other file in the set, because only the hard cards have a
+ * list of what they say written down. This is the number the second look has
+ * to justify itself against: run the standard test with a second look turned
+ * off, then with it on, and the difference between these two counts is what
+ * the extra seconds bought.
+ */
+export const wordsFoundIn = (
+    filename: string,
+    text: string,
+): { found: number; expected: number } | null => {
+    const expected = STANDARD_EXPECTED[filename];
+    if (!expected) return null;
+    const haystack = sameShape(text);
+    return {
+        found: expected.filter((wanted) => haystack.includes(sameShape(wanted))).length,
+        expected: expected.length,
+    };
+};
+
+/**
+ * Draw the card.
+ *
+ * `photo` is the larger, more photograph-like version: a coloured header
+ * band, and the Arabic label printed beside each English one, the way the
+ * real card does it. The browser shapes and joins the Arabic itself, which
+ * every browser this app runs in can do.
+ */
+const drawCard = (
+    width: number,
+    height: number,
+    { photo = false }: { photo?: boolean } = {},
+): HTMLCanvasElement => {
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    const context = canvas.getContext('2d');
+    if (!context) throw new Error('This browser will not draw the test pages.');
+
+    const scale = width / 900;
+
+    // A tinted background with grey printing on it: low contrast on purpose,
+    // because that is what defeats the reader on a real card.
+    context.fillStyle = photo ? '#eceae3' : '#eceae6';
+    context.fillRect(0, 0, width, height);
+
+    if (photo) {
+        context.fillStyle = '#9b2d2d';
+        context.fillRect(0, 0, width, 110 * scale);
+        context.fillStyle = '#ffffff';
+        context.font = `bold ${30 * scale}px Tahoma, "Segoe UI", Arial, sans-serif`;
+        context.textBaseline = 'middle';
+        context.fillText('UNITED ARAB EMIRATES', 40 * scale, 55 * scale);
+    }
+
+    context.textBaseline = 'top';
+    let y = (photo ? 150 : 60) * scale;
+    const left = 40 * scale;
+    const valueAt = 300 * scale;
+
+    for (const row of CARD_ROWS) {
+        // Grey labels, near-black values: the contrast a card actually uses,
+        // and the reason the labels break up first on a photograph.
+        context.fillStyle = '#6f6f6f';
+        context.font = `${(photo ? 15 : 13) * scale}px Tahoma, "Segoe UI", Arial, sans-serif`;
+        context.fillText(row.label, left, y);
+
+        context.fillStyle = '#17171a';
+        context.font = `${(photo ? 19 : 16) * scale}px Tahoma, "Segoe UI", Arial, sans-serif`;
+        context.fillText(row.value, valueAt, y - 2 * scale);
+
+        if (photo) {
+            context.fillStyle = '#5c5c5c';
+            context.font = `${20 * scale}px Tahoma, "Segoe UI", Arial, sans-serif`;
+            context.textAlign = 'right';
+            context.direction = 'rtl';
+            context.fillText(row.arabic, width - 40 * scale, y - 3 * scale);
+            context.textAlign = 'left';
+            context.direction = 'ltr';
+        }
+
+        y += (photo ? 62 : 44) * scale;
+    }
+
+    return canvas;
+};
+
+/** The same card, turned by a few degrees onto its own background — a card
+ *  photographed by hand, in other words. */
+const tiltCard = (source: HTMLCanvasElement, degrees: number): HTMLCanvasElement => {
+    const canvas = document.createElement('canvas');
+    canvas.width = source.width;
+    canvas.height = source.height;
+    const context = canvas.getContext('2d');
+    if (!context) throw new Error('This browser will not draw the test pages.');
+    context.fillStyle = '#eceae6';
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    context.translate(canvas.width / 2, canvas.height / 2);
+    context.rotate((degrees * Math.PI) / 180);
+    context.drawImage(source, -source.width / 2, -source.height / 2);
+    return canvas;
+};
+
+/** The same card, slightly out of focus. Where the browser will not blur for
+ *  us the card is used as it is, and the file set is a little kinder that
+ *  day — noted rather than silently pretended away. */
+const blurCard = (source: HTMLCanvasElement, radius: number): HTMLCanvasElement => {
+    const canvas = document.createElement('canvas');
+    canvas.width = source.width;
+    canvas.height = source.height;
+    const context = canvas.getContext('2d');
+    if (!context) throw new Error('This browser will not draw the test pages.');
+    context.fillStyle = '#eceae6';
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    try {
+        context.filter = `blur(${radius}px)`;
+    } catch {
+        // Left sharp; see above.
+    }
+    context.drawImage(source, 0, 0);
+    context.filter = 'none';
+    return canvas;
+};
+
 // --- The set itself ---------------------------------------------------------
 
 /** How many pages the scan reader will have to read, for the record. */
-export const STANDARD_PAGES = 6 + 6 + 3 + 1;
+export const STANDARD_PAGES = 6 + 6 + 3 + 1 + 4;
 
 /**
- * Twelve files, sixteen pages: six one-page scans, one six-page scan, three
+ * Sixteen files, twenty pages: six one-page scans, one six-page scan, three
  * photos (one ordinary, one with the writing on its side, one very large),
- * a blank page, and one typed text file for contrast.
+ * four cards that are hard on purpose, a blank page, and one typed text file
+ * for contrast.
  */
 export const buildStandardFiles = async (): Promise<File[]> => {
     const files: File[] = [];
@@ -207,6 +379,31 @@ export const buildStandardFiles = async (): Promise<File[]> => {
     files.push(
         new File([await toBlob(drawPage(4000, 5657, { heading: 'Large photograph' }), 'image/jpeg', 0.9)],
             'photo-large.jpg',
+            { type: 'image/jpeg' },
+        ),
+    );
+
+    // The four hard ones. Photographs rather than PDFs, because a card is
+    // something a person points a phone at.
+    const small = drawCard(900, 560);
+    files.push(
+        new File([await toBlob(small, 'image/jpeg', 0.9)], 'card-small.jpg', {
+            type: 'image/jpeg',
+        }),
+    );
+    files.push(
+        new File([await toBlob(tiltCard(small, 4), 'image/jpeg', 0.9)], 'card-tilted.jpg', {
+            type: 'image/jpeg',
+        }),
+    );
+    files.push(
+        new File([await toBlob(blurCard(small, 1.4), 'image/jpeg', 0.9)], 'card-blurred.jpg', {
+            type: 'image/jpeg',
+        }),
+    );
+    files.push(
+        new File([await toBlob(drawCard(2400, 1500, { photo: true }), 'image/jpeg', 0.9)],
+            'card-photo.jpg',
             { type: 'image/jpeg' },
         ),
     );

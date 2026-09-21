@@ -116,8 +116,53 @@ The set, fixed:
 | 6 | One-page scanned PDFs (text drawn onto a picture, no text inside) | The common case: a folder of scans |
 | 1 | Six-page scanned PDF | Catches anything that only shows up across pages |
 | 3 | Photos — one ordinary, one rotated, one 4000 pixels wide | Photos are drawn, turned upright and shrunk before reading |
+| 4 | Cards that are hard to read on purpose (see below) | The case the app was actually built for, and the only files here that test the second look |
 | 1 | Blank page | Must be reported as unreadable, not silently added |
 | 1 | Plain text file | The fast path, for contrast |
 
-Twelve files, sixteen pages to read. Changing this set changes what the
+Sixteen files, twenty pages to read. Changing this set changes what the
 number means, so it should be changed rarely, and the change noted here.
+
+### The four hard cards
+
+Added when the second look was built, because until then nothing in the set
+was difficult. Every file here was crisp black type on white, which the reader
+handles in the high eighties and nineties, so a change aimed at hard pictures
+could not be measured at all.
+
+All four are drawn from the same made-up UAE vehicle licence: six rows of
+small grey labels and near-black values on a tinted background, printed the
+way a real card prints them. Low contrast and small type are what actually
+defeat the reader, not exotic layouts.
+
+| File | What it is |
+| --- | --- |
+| `card-small.jpg` | 900 × 560, small type on a light grey background |
+| `card-tilted.jpg` | The same card turned 4°, as a card photographed by hand is |
+| `card-blurred.jpg` | The same card slightly out of focus |
+| `card-photo.jpg` | 2400 × 1500, a red header band, grey labels, and the Arabic label printed beside each English one |
+
+The Arabic is drawn with the browser's own text drawing, which shapes and
+joins it correctly; no pre-rendered pictures are needed. The labels come from
+the table in `src/ocr/labels.ts`, so the cards exercise the Arabic-label
+matching as well as the reading.
+
+Each card has its labels and values written down beside it, in
+`STANDARD_EXPECTED`. After a standard run the timing page counts how many of
+them actually appear in the stored text and shows it per file in a **Words
+found** column — "11 of 18" — which only appears on standard runs, because
+only they know what their own files say.
+
+### Measuring what a second look is worth
+
+The timing page has one switch: **read hard pictures a second time**, on by
+default. Nothing in the app itself ever turns this off; it is there so the
+standard test can answer the question honestly.
+
+Run the set once with it off and once with it on. The **Words found** column
+gives the before and after on each hard card, and the **Reads** column beside
+it gives the cost — 1, 2 or 3 reads per file. The clean files must show 1 read
+in both runs and no change in time; if they do not, the judge in
+`src/ocr/read-quality.ts` has started sending ordinary scans back for work
+they do not need, which is the one failure this whole arrangement must not
+have.
