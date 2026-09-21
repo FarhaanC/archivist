@@ -43,10 +43,29 @@ const download = (name: string, text: string): void => {
     URL.revokeObjectURL(url);
 };
 
-const Details = ({ run }: { run: ImportRunRecord }): JSX.Element => {
+/**
+ * How much of each hard card came through, keyed by file name — "7 of 18".
+ *
+ * Only the standard test has this, because only it knows what its own files
+ * say. It is the number that says whether reading a picture twice was worth
+ * the seconds it cost.
+ */
+export type WordsFound = Readonly<Record<string, string>>;
+
+const Details = ({
+    run,
+    wordsFound,
+}: {
+    run: ImportRunRecord;
+    wordsFound?: WordsFound;
+}): JSX.Element => {
     // Slowest first: the question anyone opening this has is "what took the
     // time?", and the answer should be the first row.
     const rows = [...run.files].sort((a, b) => b.readMs + b.saveMs - (a.readMs + a.saveMs));
+    // Only on the standard run, and only when something was actually
+    // counted: an empty column on an ordinary import would be a question
+    // with no answer.
+    const showWords = run.standard === true && wordsFound !== undefined;
     return (
         <>
             <div className="scroll">
@@ -56,6 +75,11 @@ const Details = ({ run }: { run: ImportRunRecord }): JSX.Element => {
                             <th>File</th>
                             <th>What it was</th>
                             <th>Pages</th>
+                            {/* What a second look costs, in plain view: a
+                                file here is 2 or 3 when a picture was poor
+                                enough to be read again, and 1 otherwise. */}
+                            <th>Reads</th>
+                            {showWords && <th>Words found</th>}
                             <th>Reading</th>
                             <th>Saving</th>
                         </tr>
@@ -68,6 +92,8 @@ const Details = ({ run }: { run: ImportRunRecord }): JSX.Element => {
                                 </td>
                                 <td>{describeKind(row.kind)}</td>
                                 <td>{row.pages ?? '—'}</td>
+                                <td>{row.pages === undefined ? '—' : (row.attempts ?? 1)}</td>
+                                {showWords && <td>{wordsFound?.[row.file] ?? '—'}</td>}
                                 <td>{formatShort(row.readMs)}</td>
                                 <td>{formatShort(row.saveMs)}</td>
                             </tr>
@@ -117,7 +143,14 @@ export const ImportSummary = ({ run }: { run: ImportRunRecord | null }): JSX.Ele
     );
 };
 
-export const ImportTimings = ({ run }: { run: ImportRunRecord | null }): JSX.Element | null => {
+export const ImportTimings = ({
+    run,
+    wordsFound,
+}: {
+    run: ImportRunRecord | null;
+    /** Standard test only: how much of each hard card came through. */
+    wordsFound?: WordsFound;
+}): JSX.Element | null => {
     const [history, setHistory] = useState<ImportRunRecord[]>([]);
     const [selected, setSelected] = useState<ImportRunRecord | null>(null);
     const [open, setOpen] = useState(false);
@@ -210,7 +243,7 @@ export const ImportTimings = ({ run }: { run: ImportRunRecord | null }): JSX.Ele
                         </>
                     )}
 
-                    {open && <Details run={showing} />}
+                    {open && <Details run={showing} wordsFound={wordsFound} />}
                 </>
             ) : (
                 <p className="small muted" style={{ margin: 0 }}>

@@ -35,14 +35,26 @@ const wasAdded = (outcome: ImportOutcome): boolean =>
 const Explanation = ({ outcome }: { outcome: ImportOutcome }): JSX.Element => {
     switch (outcome.status) {
         case 'imported':
-            return outcome.readAsScan ? (
+            if (!outcome.readAsScan) {
+                return <span className="small muted">Added to your library.</span>;
+            }
+            // The extra clause is earned only where looking again actually
+            // produced a better reading. A second look that was tried and did
+            // not help changed nothing the person can see, so announcing it
+            // would be noise about the app's own effort.
+            return outcome.secondLook?.improved ? (
+                <span className="small muted">
+                    Added. This one was a scan and hard to read, so it was read{' '}
+                    {outcome.secondLook.attempts === 2 ? 'twice' : 'three times'} and the
+                    clearer reading kept — the odd word may still be wrong, and the
+                    passages shown with an answer will tell you.
+                </span>
+            ) : (
                 <span className="small muted">
                     Added. This one was a scan, so the words were read off the picture of
                     the page — the odd one may be wrong, and the passages shown with an
                     answer will tell you.
                 </span>
-            ) : (
-                <span className="small muted">Added to your library.</span>
             );
 
         case 'duplicate':

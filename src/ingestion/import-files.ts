@@ -17,6 +17,7 @@ import type { PlainDiff } from '@/knowledge/word-diff';
 import type { EmbeddingWorker } from '@/lib/types';
 import type { RunProgressSoFar } from '@/ingestion/import-timing';
 import type { ScanReader } from '@/ocr/reader';
+import type { SecondLook } from '@/ocr/second-look';
 import type { ParseResult } from '@/parsers/types';
 
 /**
@@ -50,6 +51,9 @@ export type ImportOutcome =
           chunkCount?: number;
           /** The words were read off a picture of the page, so a few may be wrong. */
           readAsScan?: boolean;
+          /** The picture was hard to read, so it was read more than once and
+           *  the clearer reading kept. */
+          secondLook?: SecondLook;
       }
     | {
           status: 'near-duplicate';
@@ -109,6 +113,19 @@ export interface ImportOptions {
     onRun?: (run: ImportRunRecord) => void;
     /** Set by the standard timing test, whose file set never changes. */
     standard?: boolean;
+    /**
+     * Whether a picture that read badly is read again, more carefully.
+     *
+     * Off unless asked for. Measured on the standard test's four hard cards
+     * with the real engine, the second look doubled the time the whole set
+     * took and read nothing extra on any of them: the judge sent a card that
+     * was already read well back for two more reads because a card has few
+     * words, and enlarging a blurred one made it read worse. The first
+     * reading was kept each time, so nobody lost anything but the seconds.
+     * The hidden timing page can turn it on to measure a better version;
+     * ordinary imports leave it off until there is one.
+     */
+    secondLook?: boolean;
     /** Off in tests that do not care about the history. */
     record?: boolean;
     /** Past runs, used to guess the time left before this run has measured
@@ -119,6 +136,23 @@ export interface ImportOptions {
 /** Everything that came back from reading one file, kept until its turn to
  *  be saved comes round. */
 type ReadResult = { ok: true; value: ParseResult } | { ok: false; error: unknown };
+
+/**
+ * The line shown under a file while its pictures are being read.
+ *
+ * Several extra seconds with the line unchanged reads as a stall, so a
+ * picture being read a second time says so. Plain words only: nobody dropping
+ * a photo of their licence into this app wants to be told about attempts or
+ * passes.
+ */
+export const scanDetail = (page: number, pageCount: number, readingAgain: boolean): string => {
+    if (pageCount > 1) {
+        return readingAgain
+            ? `page ${page} of ${pageCount} — reading it again`
+            : `page ${page} of ${pageCount}`;
+    }
+    return readingAgain ? 'reading it again, more carefully' : 'reading it as a scan';
+};
 
 /** What a file is, as far as the timing table is concerned. */
 const kindOf = (name: string, readAsScan: boolean): TimedFileKind => {
@@ -137,6 +171,7 @@ export const importFiles = async (
         readLimit,
         onRun,
         standard,
+        secondLook: trySecondLook = false,
         record = true,
         history = [],
     } = typeof options === 'function' ? ({ onProgress: options } as ImportOptions) : options;
@@ -225,7 +260,7 @@ export const importFiles = async (
         let outcome = 'failed';
         try {
             if (!result.ok) throw result.error;
-            const { text, readAsScan } = result.value;
+            const { text, readAsScan, secondLook } = result.value;
 
             if (!text.trim()) {
                 report.push({ status: 'failed', file: file.name, problem: explainEmpty() });
@@ -245,6 +280,7 @@ export const importFiles = async (
                 workerClient: worker,
                 blob: file,
                 readAsScan,
+                secondLook,
             });
 
             await saveDocProfile(docId, buildDocProfile(text));
@@ -271,7 +307,7 @@ export const importFiles = async (
             }
 
             outcome = 'imported';
-            report.push({ status: 'imported', file: file.name, docId, readAsScan });
+            report.push({ status: 'imported', file: file.name, docId, readAsScan, secondLook });
         } catch (error) {
             console.warn(`[Import] Could not read ${file.name}:`, error);
             const status = error instanceof UnsupportedFileError ? 'skipped' : 'failed';
@@ -308,7 +344,8 @@ export const importFiles = async (
             try {
                 const value = await parseFile(file, {
                     reader,
-                    onScanProgress: ({ page, pageCount, fraction }) => {
+                    trySecondLook,
+                    onScanProgress: ({ page, pageCount, fraction, readingAgain }) => {
                         // The page count is worth having as soon as it is
                         // known, not just at the end: it is what the guess at
                         // the time left is built from.
@@ -319,10 +356,7 @@ export const importFiles = async (
                         );
                         inFlight.set(index, {
                             file: file.name,
-                            detail:
-                                pageCount > 1
-                                    ? `page ${page} of ${pageCount}`
-                                    : 'reading it as a scan',
+                            detail: scanDetail(page, pageCount, readingAgain === true),
                             fraction,
                         });
                         notify();
@@ -333,6 +367,7 @@ export const importFiles = async (
                     kindOf(file.name, value.readAsScan === true),
                     value.pageCount,
                 );
+                if (value.secondLook) timing.readsTaken(index, value.secondLook.attempts);
                 results[index] = { ok: true, value };
             } catch (error) {
                 results[index] = { ok: false, error };

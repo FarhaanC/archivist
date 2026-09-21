@@ -57,6 +57,7 @@ interface FileInProgress {
      *  belongs. */
     known: boolean;
     pages?: number;
+    attempts?: number;
     readStarted: number;
     readMs: number;
     saveStarted: number;
@@ -82,6 +83,10 @@ export interface RunRecorder {
     startFile(index: number, file: { name: string; size?: number }): void;
     /** What this file turned out to be, and how many pages had to be read. */
     describeFile(index: number, kind: TimedFileKind, pages?: number): void;
+    /** How many times the hardest page of this file had to be read, when
+     *  that was more than once. What it costs to look again is the whole
+     *  reason for recording it. */
+    readsTaken(index: number, attempts: number): void;
     endRead(index: number): void;
     startSave(index: number): void;
     endFile(index: number, outcome: string): void;
@@ -134,6 +139,13 @@ export const startRun = ({
             if (!isFailure || !entry.known) entry.kind = kind;
             if (pages !== undefined) entry.pages = pages;
         },
+        readsTaken(index, attempts) {
+            const entry = get(index);
+            if (!entry) return;
+            // The worst page of the file is the one worth reporting, so a
+            // later, easier page never talks a harder one down.
+            if (attempts > (entry.attempts ?? 1)) entry.attempts = attempts;
+        },
         endRead(index) {
             const entry = get(index);
             if (entry && entry.readMs === 0) entry.readMs = now() - entry.readStarted;
@@ -172,6 +184,7 @@ export const startRun = ({
                     bytes: entry.bytes,
                     kind: entry.kind,
                     ...(entry.pages === undefined ? {} : { pages: entry.pages }),
+                    ...(entry.attempts === undefined ? {} : { attempts: entry.attempts }),
                     readMs: Math.round(entry.readMs),
                     saveMs: Math.round(entry.saveMs),
                     outcome: entry.outcome ?? 'unknown',

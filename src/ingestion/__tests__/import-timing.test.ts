@@ -326,6 +326,38 @@ describe('the recorder itself', () => {
         expect(run.totalMs).toBeGreaterThanOrEqual(0);
     });
 
+    test('records how many reads a hard picture cost, and nothing for easy ones', () => {
+        const timing = startRun({ fileCount: 2, cores: 8, engineCopies: 1 });
+        timing.startFile(0, { name: 'licence.jpg', size: 100 });
+        timing.describeFile(0, 'photo', 1);
+        timing.readsTaken(0, 3);
+        timing.endRead(0);
+        timing.endFile(0, 'imported');
+
+        timing.startFile(1, { name: 'clean-scan.pdf', size: 100 });
+        timing.describeFile(1, 'scan-pdf', 6);
+        timing.endRead(1);
+        timing.endFile(1, 'imported');
+
+        const run = timing.endRun();
+        expect(run.files[0]?.attempts).toBe(3);
+        // A file nothing was retried on says nothing at all, so the table
+        // shows the ordinary single read.
+        expect(run.files[1]?.attempts).toBeUndefined();
+    });
+
+    test('the hardest page of a document is the one reported', () => {
+        const timing = startRun({ fileCount: 1, cores: 8, engineCopies: 1 });
+        timing.startFile(0, { name: 'mixed.pdf', size: 100 });
+        timing.describeFile(0, 'scan-pdf', 4);
+        timing.readsTaken(0, 3);
+        timing.readsTaken(0, 2); // a later, easier page
+        timing.endRead(0);
+        timing.endFile(0, 'imported');
+
+        expect(timing.endRun().files[0]?.attempts).toBe(3);
+    });
+
     test('a file that failed to save was still whatever it was', () => {
         const timing = startRun({ fileCount: 2, cores: 8, engineCopies: 1 });
         timing.startFile(0, { name: 'scan.pdf' });
