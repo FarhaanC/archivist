@@ -258,6 +258,18 @@ export const createReaderPool = ({
  * built for — a UAE identity card, a driving licence, a visa page — carry
  * both on the same page. Tesseract takes several languages joined with "+"
  * and decides per word. The parameter stays so a caller can narrow it.
+ *
+ * Nothing here chooses how the engine looks at a page's layout, and that is
+ * on purpose. Used this way the engine defaults to reading a page as one
+ * plain block of lines, top to bottom (its "single block" setting), and a
+ * test against the alternative — letting it look for columns and pictures
+ * first — found the alternative worse on exactly the documents that matter:
+ * on a made-up licence it dropped the Arabic column, on a denser one it
+ * turned the expiry row into scraps, and on a slightly tilted one it read
+ * the labels and skipped every value. It was better only on a photo of a
+ * page laid out in two columns, which the block setting reads across. So a
+ * card that still comes out garbled is not a layout problem to be fixed
+ * with a setting; the picture itself is the next thing to look at.
  */
 export const createTesseractReader = (
     language = 'eng+ara',
