@@ -14,6 +14,7 @@ import { STOP_WORDS } from '@/search/constants';
 import { buildSources, type ContextSource } from '@/search/context';
 import { makeSnippet } from '@/search/snippet';
 import { isFollowUp } from '@/llm/follow-up';
+import { tidyAnswer } from '@/llm/tidy-answer';
 import { describeSearch } from '@/chat/searched-with';
 import type { SearchedWith } from '@/db/types';
 import type { EmbeddingWorker, SearchResult } from '@/search/types';
@@ -32,6 +33,8 @@ import type { EmbeddingWorker, SearchResult } from '@/search/types';
 const SYSTEM_PROMPT = `You answer questions from excerpts of the user's own documents — CVs, contracts, notes. The excerpts are often fragments rather than prose: headings, bullet points, a date sitting beside a job title. Read them as facts and report them.
 
 Write a direct answer in your own plain sentences. Put [filename] after each fact, using the filename exactly as given.
+
+Say each fact once. Do not restate the same fact in different words, and do not add facts the question did not ask for.
 
 Use only what the excerpts say. Do not add general knowledge. Do not move a name, employer or date from one excerpt onto something in another. Do not say what the user has not done — you are shown a few passages, not whole documents.
 
@@ -289,6 +292,11 @@ export const ask = async (
             coach: null,
         };
     }
+
+    // The streamed text may have repeated itself on screen; what is saved
+    // and shown from now on says each fact once. This is done here, on the
+    // complete answer, and never inside the token loop above.
+    answer = tidyAnswer(answer);
 
     recordEvidenceDocs(sources.map((s) => s.filename));
 
