@@ -27,18 +27,16 @@ export const describeSearch = (
 
 /**
  * Answers saved before this distinction existed recorded only the list of
- * queries. Those were overwhelmingly split questions, and there is nothing
- * left to tell them apart by, so they read as multi-part.
+ * queries, with nothing to say which of the two reasons produced it. They
+ * used to be read as split questions — the commoner case — which meant old
+ * follow-ups were labelled "Searched as 2 separate questions" for good. A
+ * label that might be wrong is worse than none, so those answers now say
+ * nothing about how they were searched. Every answer saved since records
+ * the reason and is unaffected.
  */
 export const searchedWithOf = (
     message: Pick<MessageRecord, 'searchedWith' | 'subQueries'>,
-): SearchedWith | null => {
-    if (message.searchedWith) return message.searchedWith;
-    if (message.subQueries && message.subQueries.length > 1) {
-        return { kind: 'multi-part', queries: message.subQueries };
-    }
-    return null;
-};
+): SearchedWith | null => message.searchedWith ?? null;
 
 /** The one-line summary the user sees before opening the detail. */
 export const searchHeading = (searched: SearchedWith): string =>

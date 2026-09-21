@@ -55,10 +55,12 @@ describe('searchedWithOf', () => {
         expect(searched?.kind).toBe('follow-up');
     });
 
-    /** Answers saved before the distinction existed must still render. */
-    test('an older answer with only a query list still reads as a split', () => {
-        const searched = searchedWithOf({ subQueries: ['a', 'b'] });
-        expect(searched).toEqual({ kind: 'multi-part', queries: ['a', 'b'] });
+    /**
+     * Answers saved before the reason was recorded cannot be told apart —
+     * a split or a follow-up — so they say nothing rather than guess.
+     */
+    test('an older answer with only a query list says nothing', () => {
+        expect(searchedWithOf({ subQueries: ['a', 'b'] })).toBeNull();
     });
 
     test('a question searched exactly as typed says nothing', () => {
