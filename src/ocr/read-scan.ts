@@ -1,6 +1,10 @@
 import type { PDFDocumentProxy } from 'pdfjs-dist';
+import { copyCanvas, releaseCanvas } from '@/ocr/enhance';
+import { explainArabicLabels } from '@/ocr/labels';
 import { workerCountFor } from '@/ocr/reader';
+import { readWithSecondLook } from '@/ocr/second-look';
 import type { ScanReader, ScanSource } from '@/ocr/reader';
+import type { SecondLook } from '@/ocr/second-look';
 
 /**
  * Reading a scanned document: draw each page as a picture, hand the picture
@@ -25,6 +29,24 @@ export interface ScanProgress {
     pageCount: number;
     /** 0–1 across the whole document, not just this page. */
     fraction: number;
+    /** True while a picture that read badly is being read again. What the
+     *  person is shown changes to say so, because several extra seconds with
+     *  no explanation looks like the app has stalled. */
+    readingAgain?: boolean;
+}
+
+/**
+ * How to read, where there is a choice about it.
+ *
+ * There is exactly one. The second look is off unless asked for: measured
+ * with the real engine on the standard test's hard cards it cost a second
+ * read on pictures that were already read well and improved none of them,
+ * so for now only the hidden timing page turns it on, to measure whether a
+ * better version of it has earned its seconds. A person is never asked to
+ * choose this.
+ */
+export interface ReadOptions {
+    trySecondLook?: boolean;
 }
 
 export interface ScanOutcome {
@@ -32,6 +54,16 @@ export interface ScanOutcome {
     /** Average of the per-page confidences, 0–100. */
     confidence: number;
     pageCount: number;
+    /**
+     * Set when at least one page was read more than once.
+     *
+     * For a document of several pages this describes the page that needed the
+     * most work — `attempts` is the most any single page took, not the total
+     * across the document, because what the person is being told is how hard
+     * the worst page was, and a forty-page scan read once each would
+     * otherwise report forty.
+     */
+    secondLook?: SecondLook;
 }
 
 /**
@@ -110,15 +142,52 @@ export const cleanScanText = (raw: string): string => {
     return paragraphs.join('\n\n').trim();
 };
 
+/**
+ * Everything done to a page's words between the reader and the store: tidied
+ * into paragraphs, then with the meaning of any Arabic label written in after
+ * it.
+ *
+ * Only ever applied to words read off a picture. A typed document carries its
+ * own labels intact and is never touched by this.
+ */
+const tidyScanText = (raw: string): string => explainArabicLabels(cleanScanText(raw));
+
 /** Whether a reader result is worth keeping at all. */
 export const isReadable = (text: string, confidence: number): boolean =>
     confidence >= MIN_PAGE_CONFIDENCE && /[A-Za-z؀-ۿ]{3,}/.test(text);
 
 /** Let go of a picture's memory as soon as its words have been read; a long
  *  scan holds a lot of them otherwise. */
-const release = (canvas: HTMLCanvasElement): void => {
-    canvas.width = 0;
-    canvas.height = 0;
+const release = releaseCanvas;
+
+/**
+ * Of the second looks taken across a document, the one worth reporting.
+ *
+ * The hardest page is the one that describes the document: it is the page
+ * that made the person wait, and the one whose reading they should know was
+ * arrived at twice.
+ */
+const worstOf = (looks: (SecondLook | undefined)[]): SecondLook | undefined => {
+    let worst: SecondLook | undefined;
+    let improved = false;
+    for (const look of looks) {
+        if (!look) continue;
+        improved ||= look.improved;
+        if (!worst || look.attempts > worst.attempts) worst = look;
+    }
+    return worst ? { ...worst, improved } : undefined;
+};
+
+/** A picture the second look can keep and let go of on its own. Null where
+ *  there is no browser to make one, or it will not make one — in which case
+ *  the first reading simply stands. */
+const copyOf = (canvas: HTMLCanvasElement): HTMLCanvasElement | null => {
+    if (typeof document === 'undefined') return null;
+    try {
+        return copyCanvas(canvas);
+    } catch {
+        return null;
+    }
 };
 
 /** Draw one page of a PDF onto a canvas the reader can look at. */
@@ -151,13 +220,21 @@ export const readScannedPdf = async (
     reader: ScanReader,
     onProgress?: (progress: ScanProgress) => void,
     readAhead = workerCountFor() + 1,
+    { trySecondLook = false }: ReadOptions = {},
 ): Promise<ScanOutcome> => {
     const pageCount = pdf.numPages;
     const pages: (string | null)[] = new Array(pageCount).fill(null);
     const fractions: number[] = new Array(pageCount).fill(0);
     const confidences: number[] = new Array(pageCount).fill(0);
+    const looks: (SecondLook | undefined)[] = new Array(pageCount).fill(undefined);
     let finished = 0;
     let firstError: unknown = null;
+
+    // How many pages are having a second look right now. A count rather than
+    // a flag because several pages are read at once, and one of them
+    // finishing its second look must not clear the line while another is
+    // still on its own.
+    let readingAgain = 0;
 
     const report = (): void =>
         onProgress?.({
@@ -166,6 +243,7 @@ export const readScannedPdf = async (
             fraction: pageCount
                 ? fractions.reduce((sum, value) => sum + value, 0) / pageCount
                 : 1,
+            ...(readingAgain > 0 ? { readingAgain: true } : {}),
         });
 
     report();
@@ -179,15 +257,41 @@ export const readScannedPdf = async (
 
         const index = pageNumber - 1;
         const canvas = await renderPage(pdf, pageNumber);
-        const job = reader
-            .readPage(canvas, (fraction) => {
-                fractions[index] = fraction;
+
+        // The page's own share of the waiting is split in two, so that a page
+        // being read again carries on filling rather than starting over: the
+        // first reading takes it to halfway, a second look takes it the rest
+        // of the way, and a page read once jumps to the end when it finishes.
+        const readOnePage = async (): Promise<void> => {
+            const first = await reader.readPage(canvas, (fraction) => {
+                fractions[index] = fraction / 2;
                 report();
-            })
-            .then(({ text, confidence }) => {
-                confidences[index] = confidence;
-                if (isReadable(text, confidence)) pages[index] = cleanScanText(text);
-            })
+            });
+            let counted = false;
+            const { result, secondLook } = trySecondLook
+                ? await readWithSecondLook({
+                      read: (image, onProgress) => reader.readPage(image, onProgress),
+                      first,
+                      picture: () => copyOf(canvas),
+                      onProgress: (fraction) => {
+                          if (!counted) {
+                              counted = true;
+                              readingAgain += 1;
+                          }
+                          fractions[index] = 0.5 + fraction / 2;
+                          report();
+                      },
+                  })
+                : { result: first, secondLook: undefined };
+            if (counted) readingAgain -= 1;
+            looks[index] = secondLook;
+            confidences[index] = result.confidence;
+            if (isReadable(result.text, result.confidence)) {
+                pages[index] = tidyScanText(result.text);
+            }
+        };
+
+        const job = readOnePage()
             .catch((error: unknown) => {
                 firstError ??= error;
             })
@@ -209,6 +313,7 @@ export const readScannedPdf = async (
         text: pages.filter((page): page is string => page !== null).join('\n\n'),
         confidence: pageCount ? confidences.reduce((sum, value) => sum + value, 0) / pageCount : 0,
         pageCount,
+        ...(worstOf(looks) ? { secondLook: worstOf(looks) as SecondLook } : {}),
     };
 };
 
@@ -221,33 +326,83 @@ export const readScannedPdf = async (
  * as nonsense. A see-through background — a PNG or WebP saved with one —
  * turns black on a canvas, which hides the writing completely.
  *
+ * The photograph as it arrived is kept open rather than thrown away once the
+ * shrunken copy has been drawn, because a second look has to enlarge from the
+ * original. Enlarging the shrunken copy would only put back, as guesswork,
+ * exactly the detail that shrinking had just discarded.
+ *
  * Where the browser cannot do this (and in tests) the photo is handed over
  * untouched, exactly as before.
  */
-const drawPhoto = async (file: Blob): Promise<{ image: ScanSource; canvas?: HTMLCanvasElement }> => {
+interface Photo {
+    /** What to read first. */
+    image: ScanSource;
+    /** A fresh copy of the photograph at the size it arrived, for a second
+     *  look to work from. Null when the original was never opened. */
+    fullSize: () => HTMLCanvasElement | null;
+    /** The size of the picture that was read, for judging how much writing
+     *  ought to have come out of it. Null when it is not known. */
+    size: { width: number; height: number } | null;
+    /** Let go of the photograph and the copy drawn from it. */
+    close(): void;
+}
+
+const plainPhoto = (file: Blob): Photo => ({
+    image: file,
+    fullSize: () => null,
+    size: null,
+    close: () => undefined,
+});
+
+const drawPhoto = async (file: Blob): Promise<Photo> => {
     if (typeof createImageBitmap !== 'function' || typeof document === 'undefined') {
-        return { image: file };
+        return plainPhoto(file);
     }
     let bitmap: ImageBitmap;
     try {
         bitmap = await createImageBitmap(file, { imageOrientation: 'from-image' });
     } catch {
-        return { image: file };
+        return plainPhoto(file);
     }
-    try {
-        const scale = photoScaleFor(bitmap.width, bitmap.height);
+
+    const onWhite = (width: number, height: number): HTMLCanvasElement | null => {
         const canvas = document.createElement('canvas');
-        canvas.width = Math.max(1, Math.round(bitmap.width * scale));
-        canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+        canvas.width = Math.max(1, Math.round(width));
+        canvas.height = Math.max(1, Math.round(height));
         const context = canvas.getContext('2d');
-        if (!context) return { image: file };
+        if (!context) return null;
         context.fillStyle = '#ffffff';
         context.fillRect(0, 0, canvas.width, canvas.height);
         context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
-        return { image: canvas, canvas };
-    } finally {
+        return canvas;
+    };
+
+    const scale = photoScaleFor(bitmap.width, bitmap.height);
+    const canvas = onWhite(bitmap.width * scale, bitmap.height * scale);
+    if (!canvas) {
         bitmap.close();
+        return plainPhoto(file);
     }
+
+    let closed = false;
+    return {
+        image: canvas,
+        size: { width: canvas.width, height: canvas.height },
+        fullSize: () => {
+            if (closed) return null;
+            try {
+                return onWhite(bitmap.width, bitmap.height);
+            } catch {
+                return null;
+            }
+        },
+        close: () => {
+            if (closed) return;
+            closed = true;
+            release(canvas);
+            bitmap.close();
+        },
+    };
 };
 
 /** Read a photo or picture of a document. One page by definition. */
@@ -255,19 +410,38 @@ export const readImageFile = async (
     file: Blob,
     reader: ScanReader,
     onProgress?: (progress: ScanProgress) => void,
+    { trySecondLook = false }: ReadOptions = {},
 ): Promise<ScanOutcome> => {
-    onProgress?.({ page: 1, pageCount: 1, fraction: 0 });
-    const { image, canvas } = await drawPhoto(file);
-    try {
-        const { text, confidence } = await reader.readPage(image, (fraction) =>
-            onProgress?.({ page: 1, pageCount: 1, fraction }),
-        );
-        return {
-            text: isReadable(text, confidence) ? cleanScanText(text) : '',
-            confidence,
+    const report = (fraction: number, readingAgain = false): void =>
+        void onProgress?.({
+            page: 1,
             pageCount: 1,
+            fraction,
+            ...(readingAgain ? { readingAgain: true } : {}),
+        });
+    report(0);
+    const photo = await drawPhoto(file);
+    try {
+        // As with a page of a scan: the first reading fills the first half of
+        // the wait, and a second look, if there is one, fills the rest.
+        const first = await reader.readPage(photo.image, (fraction) => report(fraction / 2));
+        const { result, secondLook } = trySecondLook
+            ? await readWithSecondLook({
+                  read: (image, progress) => reader.readPage(image, progress),
+                  first,
+                  picture: photo.fullSize,
+                  ...(photo.size ? { measure: photo.size } : {}),
+                  onProgress: (fraction) => report(0.5 + fraction / 2, true),
+              })
+            : { result: first, secondLook: undefined };
+        report(1);
+        return {
+            text: isReadable(result.text, result.confidence) ? tidyScanText(result.text) : '',
+            confidence: result.confidence,
+            pageCount: 1,
+            ...(secondLook ? { secondLook } : {}),
         };
     } finally {
-        if (canvas) release(canvas);
+        photo.close();
     }
 };

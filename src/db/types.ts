@@ -1,3 +1,5 @@
+import type { SecondLook } from '@/ocr/second-look';
+
 export interface DocumentRecord {
     id?: number;
     title: string;
@@ -19,6 +21,10 @@ export interface DocumentRecord {
     /** The words were read off a picture of the page (a scan or a photo),
      *  so the odd one may be wrong. Shown in the library and the report. */
     readAsScan?: boolean;
+    /** Set when the picture was hard to read and so was read more than once,
+     *  with the clearer reading kept. Documents saved before this existed
+     *  simply do not have it, and are shown exactly as they always were. */
+    secondLook?: SecondLook;
     /** Set when this document is a near-duplicate of another. */
     similarToDocId?: number;
     /** Human-readable summary of how it differs from that document. */
@@ -100,7 +106,11 @@ export interface TimedFile {
     kind: TimedFileKind;
     /** Pages the scan reader had to read. Absent for files with text inside. */
     pages?: number;
-    /** Getting the words out of the file. */
+    /** How many times the hardest page of this file had to be read: 2 or 3
+     *  where a picture was poor enough to be worth another look. Absent
+     *  means once, which is the ordinary case. */
+    attempts?: number;
+    /** Getting the words out of the file — every attempt at it included. */
     readMs: number;
     /** Cutting it up, working out what it means, and checking it is not
      *  already in the library. */

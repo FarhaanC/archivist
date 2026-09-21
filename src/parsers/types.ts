@@ -1,5 +1,6 @@
 import type { ScanReader } from '@/ocr/reader';
 import type { ScanProgress } from '@/ocr/read-scan';
+import type { SecondLook } from '@/ocr/second-look';
 
 export interface ParseResult {
     title: string;
@@ -14,6 +15,9 @@ export interface ParseResult {
      *  were read off pictures, because that is the only case where the page
      *  count is what the waiting was made of. */
     pageCount?: number;
+    /** Set when a picture was hard to read and so was read more than once.
+     *  Only ever set when the words came off a picture. */
+    secondLook?: SecondLook;
 }
 
 /** What a parser may need beyond the file: a scan reader for pictures of
@@ -21,6 +25,9 @@ export interface ParseResult {
 export interface ParseContext {
     reader?: ScanReader;
     onScanProgress?: (progress: ScanProgress) => void;
+    /** Whether a picture that read badly is read again. Off unless asked
+     *  for; see the same option on importFiles for why. */
+    trySecondLook?: boolean;
 }
 
 export class UnsupportedFileError extends Error {

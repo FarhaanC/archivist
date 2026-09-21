@@ -4,6 +4,7 @@ import { chunkText } from '@/ingestion/chunk';
 import { hashText } from '@/ingestion/dedupe';
 import { invalidateKeywordIndex } from '@/search/search';
 import type { EmbeddingWorker } from '@/lib/types';
+import type { SecondLook } from '@/ocr/second-look';
 
 export interface IngestArgs {
     /** The source file. Only `name` is required, so ingestion is testable
@@ -14,6 +15,9 @@ export interface IngestArgs {
     blob?: Blob;
     onProgress?: (done: number, total: number) => void;
     readAsScan?: boolean;
+    /** Set when the picture was hard to read and so was read more than once,
+     *  with the clearer reading kept. */
+    secondLook?: SecondLook;
 }
 
 /**
@@ -28,6 +32,7 @@ export const ingestDocument = async ({
     blob,
     onProgress,
     readAsScan,
+    secondLook,
 }: IngestArgs): Promise<number> => {
     await ensureDbOpen();
 
@@ -40,6 +45,7 @@ export const ingestDocument = async ({
         uploadedAt: Date.now(),
         contentHash: await hashText(text),
         readAsScan: readAsScan || undefined,
+        secondLook,
     })) as number;
 
     const chunks = chunkText(text);

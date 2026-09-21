@@ -58,7 +58,11 @@ describe('readImageFile', () => {
         });
         expect(out.text).toBe('Driving Licence');
         expect(out.confidence).toBe(88);
-        expect(seen).toEqual([0, 0.5, 1]);
+        // The first reading fills the first half of the wait, so that a
+        // picture that has to be read again carries on from halfway instead
+        // of starting over. A picture read once jumps to the end.
+        expect(seen).toEqual([0, 0.25, 0.5, 1]);
+        expect(out.secondLook).toBeUndefined();
     });
 
     test('returns empty text when the reader was not confident', async () => {

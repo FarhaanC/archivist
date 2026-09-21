@@ -12,7 +12,9 @@ export const parseImage = async (file: File, context: ParseContext = {}): Promis
     // and the report wording for that case fits both.
     if (!context.reader) throw new ScannedPdfError(file.name, false);
 
-    const scan = await readImageFile(file, context.reader, context.onScanProgress);
+    const scan = await readImageFile(file, context.reader, context.onScanProgress, {
+        trySecondLook: context.trySecondLook === true,
+    });
     if (!scan.text.trim()) throw new UnreadableImageError(file.name);
 
     return {
@@ -21,5 +23,6 @@ export const parseImage = async (file: File, context: ParseContext = {}): Promis
         readAsScan: true,
         scanConfidence: scan.confidence,
         pageCount: 1,
+        ...(scan.secondLook ? { secondLook: scan.secondLook } : {}),
     };
 };
