@@ -45,9 +45,26 @@ export const MAX_SOURCES = 3;
  * because the first had claimed the document's one slot. The model answered
  * "seven days" with no idea a second rule existed. A document that answers a
  * question twice, under two conditions, has to be allowed to say so.
+ *
+ * Allowing it was not enough. The same contract, asked the same question,
+ * still lost its thirty-day rule: that section was a search hit, but it
+ * scored just under 0.8 of the seven-day section and was dropped as too weak.
+ * Two rules on the same subject rarely score alike — the one whose wording
+ * happens to echo the question wins by a margin — so a strength test alone
+ * keeps throwing away the second half of a two-part answer.
+ *
+ * Position is the better witness. Two clauses that both answer a question
+ * are usually on the same page of a contract, a few hundred words apart; the
+ * two notice rules were two pieces apart. So a second hit is now also kept
+ * when it sits within NEARBY_PIECES of the first, however it scored: nearness
+ * to a strong match on the same subject is its own evidence. Four pieces is
+ * about a page. Wider than that and unrelated sections start coming along.
+ * The strength bar is lowered to 0.7 as well, for a second clause that is
+ * far away but plainly about the same thing.
  */
 export const MAX_SECTIONS_PER_DOCUMENT = 2;
-export const SECOND_SECTION_RATIO = 0.8;
+export const SECOND_SECTION_RATIO = 0.7;
+export const NEARBY_PIECES = 4;
 
 export interface ContextSource {
     docId: number;
@@ -91,18 +108,32 @@ const numeric = (score: string): number => {
     return Number.isFinite(value) ? value : 0;
 };
 
+/** Where a matched piece sits in its document, by piece id. Search results
+ *  do not carry this; buildSources looks it up for the few pieces involved. */
+export type OrdinalLookup = ReadonlyMap<number, number>;
+
 /**
- * Further strong matches from the same documents as `chosen`, best first,
- * at most MAX_SECTIONS_PER_DOCUMENT - 1 per document and only when they score
- * close to that document's best. A weak second match would drag in a section
- * the question is not about, and cost context that a third document needs.
+ * Further matches from the same documents as `chosen`, best first, at most
+ * MAX_SECTIONS_PER_DOCUMENT - 1 per document. A second match is kept when it
+ * scores close to that document's best, or when it sits within NEARBY_PIECES
+ * of it (given `ordinals`; without them, nearness cannot be judged and only
+ * strength counts). A weak, distant second match would drag in a section the
+ * question is not about, and cost context that a third document needs.
  */
 export const extraSections = <T extends { docId: number; id: number; score: string }>(
     results: T[],
     chosen: T[],
+    ordinals?: OrdinalLookup,
 ): T[] => {
     const best = new Map<number, T>();
     for (const c of chosen) best.set(c.docId, c);
+
+    const isNear = (a: T, b: T): boolean => {
+        const first = ordinals?.get(a.id);
+        const second = ordinals?.get(b.id);
+        if (first === undefined || second === undefined) return false;
+        return Math.abs(first - second) <= NEARBY_PIECES;
+    };
 
     const taken = new Map<number, number>();
     const extras: T[] = [];
@@ -110,11 +141,32 @@ export const extraSections = <T extends { docId: number; id: number; score: stri
         const top = best.get(result.docId);
         if (!top || result.id === top.id) continue;
         if ((taken.get(result.docId) ?? 0) >= MAX_SECTIONS_PER_DOCUMENT - 1) continue;
-        if (numeric(result.score) < numeric(top.score) * SECOND_SECTION_RATIO) continue;
+        const strong = numeric(result.score) >= numeric(top.score) * SECOND_SECTION_RATIO;
+        if (!strong && !isNear(result, top)) continue;
         taken.set(result.docId, (taken.get(result.docId) ?? 0) + 1);
         extras.push(result);
     }
     return extras;
+};
+
+/**
+ * The positions of the matched pieces that could become a second section:
+ * every hit from a chosen document. That is a handful of ids — search
+ * returns a few results in all — fetched in one call, so nearness can be
+ * judged without reading anything the answer would not use anyway.
+ */
+const lookupOrdinals = async (
+    results: SearchResult[],
+    chosen: SearchResult[],
+): Promise<OrdinalLookup> => {
+    const docIds = new Set(chosen.map((hit) => hit.docId));
+    const ids = results.filter((hit) => docIds.has(hit.docId)).map((hit) => hit.id);
+    const ordinals = new Map<number, number>();
+    if (ids.length === 0) return ordinals;
+    for (const chunk of await db.chunks.bulkGet(ids)) {
+        if (chunk?.id !== undefined) ordinals.set(chunk.id, chunk.ordinal);
+    }
+    return ordinals;
 };
 
 /**
@@ -200,9 +252,13 @@ export const buildSources = async (
 ): Promise<ContextSource[]> => {
     const chosen = chooseSources(results, max);
     if (chosen.length === 0) return [];
-    const extras = extraSections(results, chosen);
 
     await ensureDbOpen();
+
+    // If positions cannot be read, second sections are judged on strength
+    // alone — a weaker answer, not a broken one.
+    const ordinals = await lookupOrdinals(results, chosen).catch((): OrdinalLookup => new Map());
+    const extras = extraSections(results, chosen, ordinals);
 
     return Promise.all(
         chosen.map(async (hit): Promise<ContextSource> => {

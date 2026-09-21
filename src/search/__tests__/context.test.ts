@@ -6,6 +6,9 @@ import {
     extraSections,
     groupRuns,
     joinChunks,
+    MAX_SECTIONS_PER_DOCUMENT,
+    NEARBY_PIECES,
+    NEIGHBOUR_RADIUS,
     neighbourOrdinals,
     SECTION_GAP,
     shouldSendWhole,
@@ -53,7 +56,16 @@ describe('extraSections', () => {
         expect(extraSections(results, chosen).map((r) => r.id)).toEqual([2]);
     });
 
-    test('drops a weak second match', () => {
+    test('drops a weak second match that is far away', () => {
+        const results = [
+            hit(1, 10, 'contract.pdf', 'strong', '1.63'),
+            hit(2, 10, 'contract.pdf', 'weak', '0.90'),
+        ];
+        const ordinals = new Map([[1, 17], [2, 17 + NEARBY_PIECES + 1]]);
+        expect(extraSections(results, chooseSources(results, 3), ordinals)).toEqual([]);
+    });
+
+    test('without positions, only strength can be judged', () => {
         const results = [
             hit(1, 10, 'contract.pdf', 'strong', '1.63'),
             hit(2, 10, 'contract.pdf', 'weak', '0.90'),
@@ -61,9 +73,43 @@ describe('extraSections', () => {
         expect(extraSections(results, chooseSources(results, 3))).toEqual([]);
     });
 
-    test('never takes more than the cap per document', () => {
+    /**
+     * The real contract: the thirty-day rule scored under the bar, but sat
+     * two pieces below the seven-day rule. Nearness keeps it.
+     */
+    test('keeps a weak second match that sits near the first', () => {
+        const results = [
+            hit(1, 10, 'contract.pdf', 'seven days during probation', '1.63'),
+            hit(2, 10, 'contract.pdf', 'thirty days after probation', '0.90'),
+        ];
+        const ordinals = new Map([[1, 17], [2, 19]]);
+        expect(extraSections(results, chooseSources(results, 3), ordinals).map((r) => r.id)).toEqual([2]);
+    });
+
+    test('a strong second match is kept however far away it is', () => {
+        const results = [
+            hit(1, 10, 'contract.pdf', 'first rule', '1.63'),
+            hit(2, 10, 'contract.pdf', 'second rule', '1.20'),
+        ];
+        const ordinals = new Map([[1, 2], [2, 40]]);
+        expect(extraSections(results, chooseSources(results, 3), ordinals).map((r) => r.id)).toEqual([2]);
+    });
+
+    test('the strength bar is 0.7 of the best', () => {
+        const results = [
+            hit(1, 10, 'contract.pdf', 'best', '1.00'),
+            hit(2, 10, 'contract.pdf', 'just over', '0.71'),
+            hit(3, 11, 'other.pdf', 'other', '0.69'),
+            hit(4, 11, 'other.pdf', 'just under', '0.48'),
+        ];
+        const far = new Map([[1, 0], [2, 30], [3, 0], [4, 30]]);
+        expect(extraSections(results, chooseSources(results, 3), far).map((r) => r.id)).toEqual([2]);
+    });
+
+    test('never takes more than the cap per document, even when all are near', () => {
         const results = [1, 2, 3, 4].map((n) => hit(n, 10, 'contract.pdf', `part ${n}`, '1.60'));
-        expect(extraSections(results, chooseSources(results, 3))).toHaveLength(1);
+        const ordinals = new Map([[1, 1], [2, 2], [3, 3], [4, 4]]);
+        expect(extraSections(results, chooseSources(results, 3), ordinals)).toHaveLength(1);
     });
 });
 
@@ -217,6 +263,116 @@ describe('buildSources', () => {
         expect(sources[0]?.text).toContain('Thirty days Notice');
         expect(sources[0]?.text).toContain(SECTION_GAP.trim());
         expect(sources[0]?.text).not.toContain('Salary is paid monthly');
+    });
+
+    /**
+     * The case that stayed wrong after the two-section rule went in. The
+     * thirty-day clause is a weak hit, but it is two pieces below the
+     * seven-day clause — same page — and both must reach the model.
+     */
+    test('a weak second match two pieces away still reaches the model', async () => {
+        const docId = (await db.documents.add({
+            title: 'contract.pdf',
+            fullText: 'x'.repeat(WHOLE_DOCUMENT_LIMIT + 3000),
+            uploadedAt: Date.now(),
+        })) as number;
+        await db.chunks.bulkAdd(
+            [...Array(25).keys()].map((n) => ({ docId, ordinal: n, text: `Clause ${n}.`, vector: [] })),
+        );
+        await db.chunks.where({ docId, ordinal: 17 }).modify({ text: 'Probation: seven days notice.' });
+        await db.chunks.where({ docId, ordinal: 19 }).modify({ text: 'Resignation: thirty days notice.' });
+        const first = await db.chunks.where({ docId, ordinal: 17 }).first();
+        const second = await db.chunks.where({ docId, ordinal: 19 }).first();
+
+        const sources = await buildSources([
+            hit(first?.id as number, docId, 'contract.pdf', 'Probation: seven days notice.', '1.63'),
+            hit(second?.id as number, docId, 'contract.pdf', 'Resignation: thirty days notice.', '1.02'),
+        ]);
+
+        expect(sources).toHaveLength(1);
+        expect(sources[0]?.text).toContain('seven days notice');
+        expect(sources[0]?.text).toContain('thirty days notice');
+        // 17 and 19 each bring a neighbour, so 16–20 is one continuous run.
+        expect(sources[0]?.sections).toBe(1);
+        expect(sources[0]?.text).not.toContain(SECTION_GAP.trim());
+        expect(sources[0]?.text).not.toContain('Clause 15.');
+        expect(sources[0]?.text).not.toContain('Clause 21.');
+    });
+
+    test('a weak second match far away is left out', async () => {
+        const docId = (await db.documents.add({
+            title: 'contract.pdf',
+            fullText: 'x'.repeat(WHOLE_DOCUMENT_LIMIT + 3000),
+            uploadedAt: Date.now(),
+        })) as number;
+        await db.chunks.bulkAdd(
+            [...Array(25).keys()].map((n) => ({ docId, ordinal: n, text: `Clause ${n}.`, vector: [] })),
+        );
+        const first = await db.chunks.where({ docId, ordinal: 2 }).first();
+        const second = await db.chunks.where({ docId, ordinal: 20 }).first();
+
+        const sources = await buildSources([
+            hit(first?.id as number, docId, 'contract.pdf', 'Clause 2.', '1.63'),
+            hit(second?.id as number, docId, 'contract.pdf', 'Clause 20.', '1.02'),
+        ]);
+
+        expect(sources[0]?.sections).toBe(1);
+        expect(sources[0]?.text).toContain('Clause 2.');
+        expect(sources[0]?.text).not.toContain('Clause 20.');
+    });
+
+    /**
+     * Two sections each with a neighbour either side is the most a document
+     * can send. The bound is stated in pieces so it stays true if the
+     * numbers change together.
+     */
+    test('a source is never longer than two full windows and a gap', async () => {
+        const pieceSize = 500;
+        const docId = (await db.documents.add({
+            title: 'long.pdf',
+            fullText: 'x'.repeat(WHOLE_DOCUMENT_LIMIT + 3000),
+            uploadedAt: Date.now(),
+        })) as number;
+        await db.chunks.bulkAdd(
+            [...Array(30).keys()].map((n) => ({
+                docId,
+                ordinal: n,
+                text: `${n}`.padEnd(pieceSize, `p${n}`),
+                vector: [],
+            })),
+        );
+        const a = await db.chunks.where({ docId, ordinal: 5 }).first();
+        const b = await db.chunks.where({ docId, ordinal: 25 }).first();
+
+        const sources = await buildSources([
+            hit(a?.id as number, docId, 'long.pdf', 'a', '1.60'),
+            hit(b?.id as number, docId, 'long.pdf', 'b', '1.50'),
+        ]);
+
+        const windows = MAX_SECTIONS_PER_DOCUMENT * (2 * NEIGHBOUR_RADIUS + 1);
+        const bound = windows * (pieceSize + 1) + SECTION_GAP.length * (MAX_SECTIONS_PER_DOCUMENT - 1);
+        expect(sources[0]?.sections).toBe(2);
+        expect(sources[0]?.text.length).toBeLessThanOrEqual(bound);
+    });
+
+    test('nearness changes nothing for a short document, which is still sent whole', async () => {
+        const fullText = 'Short contract. Seven days notice in probation. Thirty days after.';
+        const docId = (await db.documents.add({ title: 'short.pdf', fullText, uploadedAt: Date.now() })) as number;
+        await db.chunks.bulkAdd([
+            { docId, ordinal: 0, text: 'Seven days notice in probation.', vector: [] },
+            { docId, ordinal: 1, text: 'Thirty days after.', vector: [] },
+        ]);
+        const a = await db.chunks.where({ docId, ordinal: 0 }).first();
+        const b = await db.chunks.where({ docId, ordinal: 1 }).first();
+
+        const sources = await buildSources([
+            hit(a?.id as number, docId, 'short.pdf', 'Seven days notice in probation.', '1.60'),
+            hit(b?.id as number, docId, 'short.pdf', 'Thirty days after.', '0.50'),
+        ]);
+
+        expect(sources).toHaveLength(1);
+        expect(sources[0]?.kind).toBe('whole-document');
+        expect(sources[0]?.text).toBe(fullText);
     });
 
     test('two matches that sit next to each other merge into one longer window', async () => {
